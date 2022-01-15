@@ -1,4 +1,4 @@
-## RETRO - Pytorch
+## RETRO - Pytorch (wip)
 
 Implementation of <a href="https://arxiv.org/abs/2112.04426">RETRO</a>, Deepmind's Retrieval based Attention net, in Pytorch
 
