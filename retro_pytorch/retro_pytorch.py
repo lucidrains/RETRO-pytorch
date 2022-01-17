@@ -100,9 +100,9 @@ class Attention(nn.Module):
 
     def forward(self, x, context = None, pos_emb = None):
         device, h, scale = x.device, self.heads, self.scale
-        kv_input = default(context, x)
 
         x = self.norm(x)
+        kv_input = default(context, x)
 
         q = self.to_q(x)
         k, v = self.to_kv(kv_input).chunk(2, dim = -1)
