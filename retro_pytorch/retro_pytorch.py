@@ -164,7 +164,7 @@ class ChunkedCrossAttention(nn.Module):
     def forward(self, x, *, context, pos_emb = None, **kwargs):
         # derive variables
 
-        b, n, chunk_size = x.shape[0], x.shape[-2], context.shape[-2]
+        b, n, num_retrieved, chunk_size = x.shape[0], x.shape[-2], context.shape[-3], context.shape[-2]
         causal_padding = chunk_size - 1
 
         # causal padding
@@ -180,14 +180,14 @@ class ChunkedCrossAttention(nn.Module):
             # properly chunk positional embeddings
 
             q_pos_emb = repeat(q_pos_emb, '1 h (k n) d -> (b k) h n d', n = chunk_size, b = b)
-            k_pos_emb = repeat(k_pos_emb, '1 h (k n) d -> (b k) h n d', n = chunk_size, b = b)
+            k_pos_emb = repeat(k_pos_emb, '1 h (k n) d -> (b k) h (r n) d', n = chunk_size, b = b, r = num_retrieved)
 
             pos_emb = (q_pos_emb, k_pos_emb)
 
         # reshape so we have chunk to chunk attention, without breaking causality
 
         x = rearrange(x, 'b (k n) d -> (b k) n d', n = chunk_size)
-        context = rearrange(context, 'b k n d -> (b k) n d')
+        context = rearrange(context, 'b k r n d -> (b k) (r n) d')
 
         # cross attention
 
@@ -215,7 +215,7 @@ class Transformer(nn.Module):
         ff_mult = 4,
         ff_dropout = 0.,
         final_norm = True,
-        cross_attn_layers = tuple(),
+        cross_attn_layers = None,
         chunked_cross_attn = False
     ):
         super().__init__()
@@ -225,7 +225,7 @@ class Transformer(nn.Module):
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
         for layer_num in range(1, depth + 1):
-            has_cross_attn = layer_num in cross_attn_layers
+            has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
             cross_attn_klass = Attention if not chunked_cross_attn else ChunkedCrossAttention
 
             self.layers.append(nn.ModuleList([
@@ -257,13 +257,14 @@ class RETRO(nn.Module):
         self,
         *,
         num_tokens,
-        dim,
         max_seq_len = 2048,
-        enc_depth = 12,
-        enc_cross_attn_layers = (1, 3, 6, 9),
+        enc_dim = 896,
+        enc_depth = 2,
+        enc_cross_attn_layers = None,
         dec_depth = 12,
         dec_cross_attn_layers = (1, 3, 6, 9),
         heads = 8,
+        dec_dim = 768,
         dim_head = 64,
         enc_attn_dropout = 0.,
         enc_ff_dropout = 0.,
@@ -271,11 +272,14 @@ class RETRO(nn.Module):
         dec_ff_dropout = 0.
     ):
         super().__init__()
-        self.token_emb = nn.Embedding(num_tokens, dim)
-        self.pos_emb = nn.Embedding(max_seq_len, dim)
+        self.token_emb = nn.Embedding(num_tokens, enc_dim)
+        self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
+
+        self.to_decoder_model_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
+        self.encoder_output_to_decoder_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
 
         self.encoder = Transformer(
-            dim = dim,
+            dim = enc_dim,
             depth = enc_depth,
             attn_dropout = enc_attn_dropout,
             ff_dropout = enc_ff_dropout,
@@ -283,7 +287,7 @@ class RETRO(nn.Module):
         )
 
         self.decoder = Transformer(
-            dim = dim,
+            dim = dec_dim,
             depth = dec_depth,
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
@@ -292,7 +296,7 @@ class RETRO(nn.Module):
             cross_attn_layers = dec_cross_attn_layers
         )
 
-        self.to_logits = nn.Linear(dim, num_tokens)
+        self.to_logits = nn.Linear(dec_dim, num_tokens)
 
     def forward(
         self,
@@ -300,7 +304,20 @@ class RETRO(nn.Module):
         retrieved,
         return_loss = False
     ):
+        """
+        b - batch
+        n - sequence length / chunk length
+        k - number of chunks
+        d - feature dimension
+        r - num retrieved neighbors
+        """
+
         assert not (return_loss and not self.training), 'must be training if returning loss'
+
+        # handle some user inputs
+
+        if retrieved.ndim == 3:
+            retrieved = rearrange(retrieved, 'b k n -> b k 1 n') # 1 neighbor retrieved
 
         # if training, derive labels
 
@@ -309,7 +326,7 @@ class RETRO(nn.Module):
 
         # variables
 
-        n, chunk_size, device = seq.shape[-1], retrieved.shape[-1], seq.device
+        n, chunk_size, num_retrieved, device = seq.shape[-1], retrieved.shape[-1], retrieved.shape[-2], seq.device
 
         assert divisible_by(n, chunk_size), 'sequence length must be divisible by chunk size'
 
@@ -326,11 +343,16 @@ class RETRO(nn.Module):
 
         # encode
 
-        retrieved = rearrange(retrieved, 'b k n d -> (b k) n d')
-        embed_as_context = rearrange(embed, 'b (k n) d -> (b k) n d', n = chunk_size)
+        retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d', r = num_retrieved)
+        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', n = chunk_size, r = num_retrieved)
 
         retrieved = self.encoder(retrieved, context = embed_as_context)
-        retrieved = rearrange(retrieved, '(b k) n d -> b k n d', k = n // chunk_size)
+        retrieved = rearrange(retrieved, '(b k r) n d -> b k r n d', k = n // chunk_size, r = num_retrieved)
+
+        # project both sequence embedding and retrieved embedding to decoder dimension if necessary
+
+        embed = self.to_decoder_model_dim(embed)
+        retrieved = self.encoder_output_to_decoder_dim(retrieved)
 
         # decode
 

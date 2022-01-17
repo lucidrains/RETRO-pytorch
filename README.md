@@ -21,19 +21,19 @@ from retro_pytorch import RETRO
 retro = RETRO(
     num_tokens = 20000,                      # number of tokens
     max_seq_len = 2048,                      # max sequence length
-    dim = 896,                               # model dimension
-    enc_depth = 12,                          # encoder depth
-    enc_cross_attn_layers = (1, 3, 6, 9),    # encoder cross attention layers
+    enc_dim = 896,                           # encoder model dim
+    enc_depth = 2,                           # encoder depth
     dec_depth = 12,                          # decoder depth
     dec_cross_attn_layers = (1, 3, 6, 9),    # decoder cross attention layers (with causal chunk cross attention)
     heads = 8,                               # attention heads
+    dec_dim = 796,                           # decoder model dim
     dim_head = 64,                           # dimension per head
     dec_attn_dropout = 0.25,                 # decoder attention dropout
     dec_ff_dropout = 0.25                    # decoder feedforward dropout
 )
 
 seq = torch.randint(0, 20000, (2, 2048 + 1))      # plus one since it is split into input and labels for training
-retrieved = torch.randint(0, 20000, (2, 32, 64))  # retrieved tokens - (batch, num chunks, chunk_size)
+retrieved = torch.randint(0, 20000, (2, 32, 64))  # retrieved tokens - (batch, num chunks, num retrieved neighbors, chunk_size)
 
 loss = retro(seq, retrieved, return_loss = True)
 loss.backward()
