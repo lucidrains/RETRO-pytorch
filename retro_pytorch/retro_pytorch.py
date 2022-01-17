@@ -31,12 +31,14 @@ class RMSNorm(nn.Module):
         return (x / norm.clamp(min = self.eps)) * self.gamma
 
 def FeedForward(dim, mult = 4, dropout = 0.):
+    inner_dim = int(mult * dim)
+
     return nn.Sequential(
         RMSNorm(dim),
-        nn.Linear(dim, dim * mult),
+        nn.Linear(dim, inner_dim),
         nn.GELU(),
         nn.Dropout(dropout),
-        nn.Linear(dim * mult, dim)
+        nn.Linear(inner_dim, dim)
     )
 
 class Attention(nn.Module):
@@ -46,13 +48,17 @@ class Attention(nn.Module):
         *,
         dim_head = 64,
         heads = 8,
-        causal = False
+        causal = False,
+        dropout = 0.
     ):
         super().__init__()
         self.heads = heads
         self.scale = dim_head ** -0.5
         self.causal = causal
         inner_dim = dim_head * heads
+
+        self.norm = RMSNorm(dim)
+        self.dropout = nn.Dropout(dropout)
 
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
@@ -61,6 +67,8 @@ class Attention(nn.Module):
     def forward(self, x, context = None):
         device, h, scale = x.device, self.heads, self.scale
         kv_input = default(context, x)
+
+        x = self.norm(x)
 
         q = self.to_q(x)
         k, v = self.to_kv(kv_input).chunk(2, dim = -1)
@@ -89,6 +97,8 @@ class Attention(nn.Module):
 
         attn = sim.softmax(dim = -1)
 
+        attn = self.dropout(attn)
+
         # aggregate
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
@@ -101,6 +111,38 @@ class Attention(nn.Module):
 
         return self.to_out(out)
 
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        depth,
+        causal = False,
+        heads = 8,
+        dim_head = 64,
+        attn_dropout = 0.,
+        ff_mult = 4,
+        ff_dropout = 0.,
+        final_norm = True
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+
+        for layer_num in range(1, depth + 1):
+            self.layers.append(nn.ModuleList([
+                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal),
+                FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
+            ]))
+
+        self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
+
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+
+        return self.norm_out(x)
 
 # main class
 
@@ -127,6 +169,21 @@ class RETRO(nn.Module):
         self.token_emb = nn.Embedding(num_tokens, enc_dim)
         self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
 
+        self.encoder = Transformer(
+            dim = enc_dim,
+            depth = enc_depth,
+            attn_dropout = enc_attn_dropout,
+            ff_dropout = enc_ff_dropout
+        )
+
+        self.decoder = Transformer(
+            dim = dec_dim,
+            depth = dec_depth,
+            attn_dropout = dec_attn_dropout,
+            ff_dropout = dec_ff_dropout,
+            causal = True
+        )
+
         self.to_logits = nn.Linear(dec_dim, num_tokens)
 
     def forward(
@@ -144,7 +201,7 @@ class RETRO(nn.Module):
 
         # variables
 
-        n, device = seq.shape[-1], seq.device
+        n, chunk_size, device = seq.shape[-1], retrieved.shape[-1], seq.device
 
         # embed both sequence and retrieved chunks
 
@@ -156,6 +213,16 @@ class RETRO(nn.Module):
         pos_emb = self.pos_emb(torch.arange(n, device = device))
         pos_emb = rearrange(pos_emb, 'n d -> 1 n d')
         embed = embed + pos_emb
+
+        # encode
+
+        retrieved = rearrange(retrieved, 'b k n d -> (b k) n d')
+        retrieved = self.encoder(retrieved)
+        retrieved = rearrange(retrieved, '(b k) n d -> b k n d', k = chunk_size)
+
+        # decode
+
+        embed = self.decoder(embed)
 
         # project to logits
 
