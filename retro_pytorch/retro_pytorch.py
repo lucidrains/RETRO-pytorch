@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 
-from einops import rearrange
+from einops import rearrange, repeat
 
 # helper functions
 
@@ -15,7 +15,10 @@ def default(val, d):
 def divisible_by(val, divisor):
     return (val / divisor).is_integer()
 
-# helper classes
+def cast_tuple(val, num = 1):
+    return val if isinstance(val, tuple) else ((val,) * num)
+
+# normalization
 
 class RMSNorm(nn.Module):
     def __init__(
@@ -33,6 +36,32 @@ class RMSNorm(nn.Module):
         norm = x.norm(keepdim = True, dim = -1) * self.scale
         return (x / norm.clamp(min = self.eps)) * self.gamma
 
+# positional embedding
+
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer('inv_freq', inv_freq)
+
+    def forward(self, max_seq_len, device):
+        seq = torch.arange(max_seq_len, device = device)
+        freqs = einsum('i , j -> i j', seq.type_as(self.inv_freq), self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim = -1)
+        return rearrange(emb, 'n d -> 1 1 n d')
+
+def rotate_half(x):
+    x = rearrange(x, '... (j d) -> ... j d', j = 2)
+    x1, x2 = x.unbind(dim = -2)
+    return torch.cat((-x2, x1), dim = -1)
+
+def apply_rotary_pos_emb(t, freqs):
+    seq_len = t.shape[-2]
+    freqs = freqs[:, :, -seq_len:]
+    return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
+
+# feedforward
+
 def FeedForward(dim, mult = 4, dropout = 0.):
     inner_dim = int(mult * dim)
 
@@ -43,6 +72,8 @@ def FeedForward(dim, mult = 4, dropout = 0.):
         nn.Dropout(dropout),
         nn.Linear(inner_dim, dim)
     )
+
+# attention
 
 class Attention(nn.Module):
     def __init__(
@@ -67,7 +98,7 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
-    def forward(self, x, context = None):
+    def forward(self, x, context = None, pos_emb = None):
         device, h, scale = x.device, self.heads, self.scale
         kv_input = default(context, x)
 
@@ -84,6 +115,13 @@ class Attention(nn.Module):
 
         q = q * scale
 
+        # apply relative positional encoding (rotary embeddings)
+
+        if exists(pos_emb):
+            q_pos_emb, k_pos_emb = cast_tuple(pos_emb, num = 2)
+            q = apply_rotary_pos_emb(q, q_pos_emb)
+            k = apply_rotary_pos_emb(k, k_pos_emb)
+
         # derive query key similarities
 
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
@@ -92,7 +130,7 @@ class Attention(nn.Module):
 
         if self.causal:
             i, j = sim.shape[-2:]
-            causal_mask = torch.ones(i, j, device = device).triu(j - i + 1)
+            causal_mask = torch.ones(i, j, device = device, dtype = torch.bool).triu(j - i + 1)
             mask_value = -torch.finfo(sim.dtype).max
             sim = sim.masked_fill(causal_mask, mask_value)
 
@@ -123,15 +161,28 @@ class ChunkedCrossAttention(nn.Module):
         super().__init__()
         self.cross_attn = Attention(**kwargs)
 
-    def forward(self, x, *, context, **kwargs):
+    def forward(self, x, *, context, pos_emb = None, **kwargs):
         # derive variables
 
-        n, chunk_size = x.shape[-2], context.shape[-2]
+        b, n, chunk_size = x.shape[0], x.shape[-2], context.shape[-2]
         causal_padding = chunk_size - 1
 
         # causal padding
 
         x = F.pad(x, (0, 0, -causal_padding, causal_padding), value = 0.)
+
+        if exists(pos_emb):
+            q_pos_emb, k_pos_emb = cast_tuple(pos_emb, num = 2)
+
+            # make sure queries positions are properly shifted
+            q_pos_emb = F.pad(q_pos_emb, (0, 0, -causal_padding, causal_padding), value = 0.)
+
+            # properly chunk positional embeddings
+
+            q_pos_emb = repeat(q_pos_emb, '1 h (k n) d -> (b k) h n d', n = chunk_size, b = b)
+            k_pos_emb = repeat(k_pos_emb, '1 h (k n) d -> (b k) h n d', n = chunk_size, b = b)
+
+            pos_emb = (q_pos_emb, k_pos_emb)
 
         # reshape so we have chunk to chunk attention, without breaking causality
 
@@ -140,7 +191,7 @@ class ChunkedCrossAttention(nn.Module):
 
         # cross attention
 
-        out = self.cross_attn(x, context = context, **kwargs)
+        out = self.cross_attn(x, context = context, pos_emb = pos_emb, **kwargs)
 
         # reshape back to original sequence
 
@@ -170,6 +221,9 @@ class Transformer(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
+        rotary_emb_dim = max(default(dim_head, dim_head // 2), 32)
+        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
+
         for layer_num in range(1, depth + 1):
             has_cross_attn = layer_num in cross_attn_layers
             cross_attn_klass = Attention if not chunked_cross_attn else ChunkedCrossAttention
@@ -182,13 +236,15 @@ class Transformer(nn.Module):
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
 
-    def forward(self, x, context = None):
+    def forward(self, x, *, context):
+        device, n = x.device, x.shape[-2]
+        pos_emb = self.rotary_pos_emb(n, device = device)
+
         for attn, cross_attn, ff in self.layers:
-            x = attn(x) + x
+            x = attn(x, pos_emb = pos_emb) + x
 
             if exists(cross_attn):
-                assert exists(context), 'context must be passed in for cross attention'
-                x = cross_attn(x, context = context) + x
+                x = cross_attn(x, context = context, pos_emb = pos_emb) + x
 
             x = ff(x) + x
 
