@@ -47,6 +47,7 @@ loss.backward()
 - [ ] handle reindexing of all nearest neighbors
 - [ ] function for getting frozen BERT embeddings for batch of chunks
 - [ ] check masking
+- [ ] inference code, autoretrieving
 
 ## Citations
 
