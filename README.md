@@ -2,7 +2,7 @@
 
 ## RETRO - Pytorch (wip)
 
-Implementation of <a href="https://arxiv.org/abs/2112.04426">RETRO</a>, Deepmind's Retrieval based Attention net, in Pytorch
+Implementation of <a href="https://arxiv.org/abs/2112.04426">RETRO</a>, Deepmind's Retrieval based Attention net, in Pytorch. This will deviate from the paper slightly, using rotary embeddings for relative positional encoding, as well as Faiss library instead of Scann.
 
 If you are interested, please join <a href="https://discord.gg/3AvcJfbEBd">this Discord</a> for discussions
 
