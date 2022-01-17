@@ -161,7 +161,7 @@ class ChunkedCrossAttention(nn.Module):
         super().__init__()
         self.cross_attn = Attention(**kwargs)
 
-    def forward(self, x, *, context, pos_emb = None, **kwargs):
+    def forward(self, x, *, context, pos_emb = None):
         # derive variables
 
         b, n, num_chunks, num_retrieved, chunk_size = x.shape[0], x.shape[-2], *context.shape[-4:-1]
@@ -185,7 +185,7 @@ class ChunkedCrossAttention(nn.Module):
 
         # cross attention
 
-        out = self.cross_attn(x, context = context, pos_emb = pos_emb, **kwargs)
+        out = self.cross_attn(x, context = context, pos_emb = pos_emb)
 
         # reshape back to original sequence
 

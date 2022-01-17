@@ -43,7 +43,10 @@ loss.backward()
 
 ## Todo
 
-- [ ] training wrapper that does all the Faiss stuff automagically for the researcher
+- [ ] handle indexing of corpus of text with faiss
+- [ ] handle reindexing of all nearest neighbors
+- [ ] function for getting frozen BERT embeddings for batch of chunks
+- [ ] check masking
 
 ## Citations
 
