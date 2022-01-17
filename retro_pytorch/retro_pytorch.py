@@ -156,15 +156,18 @@ class Attention(nn.Module):
 class ChunkedCrossAttention(nn.Module):
     def __init__(
         self,
+        chunk_size,
         **kwargs
     ):
         super().__init__()
+        self.chunk_size = chunk_size
         self.cross_attn = Attention(**kwargs)
 
     def forward(self, x, *, context, pos_emb = None):
         # derive variables
+        chunk_size = self.chunk_size
 
-        b, n, num_chunks, num_retrieved, chunk_size = x.shape[0], x.shape[-2], *context.shape[-4:-1]
+        b, n, num_chunks, num_retrieved = x.shape[0], x.shape[-2], *context.shape[-4:-2]
         causal_padding = chunk_size - 1
 
         # causal padding
@@ -259,7 +262,8 @@ class Decoder(nn.Module):
         ff_mult = 4,
         ff_dropout = 0.,
         final_norm = True,
-        cross_attn_layers = None
+        cross_attn_layers = None,
+        chunk_size = 64
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -272,7 +276,7 @@ class Decoder(nn.Module):
 
             self.layers.append(nn.ModuleList([
                 Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True),
-                ChunkedCrossAttention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
+                ChunkedCrossAttention(chunk_size = chunk_size, dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
                 FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
             ]))
 
@@ -317,11 +321,14 @@ class RETRO(nn.Module):
         enc_attn_dropout = 0.,
         enc_ff_dropout = 0.,
         dec_attn_dropout = 0.,
-        dec_ff_dropout = 0.
+        dec_ff_dropout = 0.,
+        chunk_size = 64
     ):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, enc_dim)
         self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
+
+        self.chunk_size = chunk_size
 
         self.to_decoder_model_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
         self.encoder_output_to_decoder_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
@@ -339,7 +346,8 @@ class RETRO(nn.Module):
             depth = dec_depth,
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
-            cross_attn_layers = dec_cross_attn_layers
+            cross_attn_layers = dec_cross_attn_layers,
+            chunk_size = chunk_size
         )
 
         self.to_logits = nn.Linear(dec_dim, num_tokens)
@@ -374,6 +382,7 @@ class RETRO(nn.Module):
 
         n, num_chunks, num_neighbors, chunk_size, device = seq.shape[-1], *retrieved.shape[-3:], seq.device
 
+        assert chunk_size >= self.chunk_size, 'chunk size of retrieval input must be greater or equal to the designated chunk_size on RETRO initialization'
         assert divisible_by(n, chunk_size), 'sequence length must be divisible by chunk size'
 
         # embed both sequence and retrieved chunks
