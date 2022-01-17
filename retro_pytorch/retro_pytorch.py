@@ -119,6 +119,7 @@ class Attention(nn.Module):
 
         if exists(pos_emb):
             q_pos_emb, k_pos_emb = cast_tuple(pos_emb, num = 2)
+
             q = apply_rotary_pos_emb(q, q_pos_emb)
             k = apply_rotary_pos_emb(k, k_pos_emb)
 
@@ -179,6 +180,7 @@ class ChunkedCrossAttention(nn.Module):
 
         q_pos_emb, k_pos_emb = pos_emb
         q_pos_emb = F.pad(q_pos_emb, (0, 0, -causal_padding, causal_padding), value = 0.)
+        k_pos_emb = repeat(k_pos_emb, 'b h n d -> b h (r n) d', r = num_retrieved)
         pos_emb = (q_pos_emb, k_pos_emb)
 
         # reshape so we have chunk to chunk attention, without breaking causality
@@ -284,11 +286,12 @@ class Decoder(nn.Module):
 
     def forward(self, x, *, retrieved):
         device, seq_len, num_chunks, num_neighbors, chunk_size = x.device, x.shape[-2], *retrieved.shape[-4:-1]
+        seq_chunk_size = seq_len // num_chunks
 
         self_attn_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
-        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_len // num_chunks + chunk_size, device = device)  # need to add extra chunk size, since it will be shifted
-        cross_attn_k_pos_emb = self.rotary_pos_emb(num_neighbors * chunk_size, device = device)
+        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size + chunk_size, device = device)  # need to add extra chunk size, since it will be shifted
+        cross_attn_k_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
 
         cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
 
