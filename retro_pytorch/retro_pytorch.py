@@ -12,6 +12,9 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+def divisible_by(val, divisor):
+    return (val / divisor).is_integer()
+
 # helper classes
 
 class RMSNorm(nn.Module):
@@ -112,6 +115,42 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 
+class ChunkedCrossAttention(nn.Module):
+    def __init__(
+        self,
+        **kwargs
+    ):
+        super().__init__()
+        self.cross_attn = Attention(**kwargs)
+
+    def forward(self, x, *, context, **kwargs):
+        # derive variables
+
+        n, chunk_size = x.shape[-2], context.shape[-2]
+        causal_padding = chunk_size - 1
+
+        # causal padding
+
+        x = F.pad(x, (0, 0, -causal_padding, causal_padding), value = 0.)
+
+        # reshape so we have chunk to chunk attention, without breaking causality
+
+        x = rearrange(x, 'b (k n) d -> (b k) n d', n = chunk_size)
+        context = rearrange(context, 'b k n d -> (b k) n d')
+
+        # cross attention
+
+        out = self.cross_attn(x, context = context, **kwargs)
+
+        # reshape back to original sequence
+
+        out = rearrange(out, '(b k) n d -> b (k n) d', k = n // chunk_size)
+
+        # pad back to original, with 0s at the beginning (which will be added to the residual and be fine)
+
+        out = F.pad(out, (0, 0, causal_padding, -causal_padding), value = 0.)
+        return out
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -124,22 +163,33 @@ class Transformer(nn.Module):
         attn_dropout = 0.,
         ff_mult = 4,
         ff_dropout = 0.,
-        final_norm = True
+        final_norm = True,
+        cross_attn_layers = tuple(),
+        chunked_cross_attn = False
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for layer_num in range(1, depth + 1):
+            has_cross_attn = layer_num in cross_attn_layers
+            cross_attn_klass = Attention if not chunked_cross_attn else ChunkedCrossAttention
+
             self.layers.append(nn.ModuleList([
                 Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal),
+                cross_attn_klass(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
                 FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
             ]))
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
 
-    def forward(self, x):
-        for attn, ff in self.layers:
+    def forward(self, x, context = None):
+        for attn, cross_attn, ff in self.layers:
             x = attn(x) + x
+
+            if exists(cross_attn):
+                assert exists(context), 'context must be passed in for cross attention'
+                x = cross_attn(x, context = context) + x
+
             x = ff(x) + x
 
         return self.norm_out(x)
@@ -151,11 +201,10 @@ class RETRO(nn.Module):
         self,
         *,
         num_tokens,
+        dim,
         max_seq_len = 2048,
-        enc_dim = 896,
         enc_depth = 12,
         enc_cross_attn_layers = (1, 3, 6, 9),
-        dec_dim = 896,
         dec_depth = 12,
         dec_cross_attn_layers = (1, 3, 6, 9),
         heads = 8,
@@ -166,25 +215,28 @@ class RETRO(nn.Module):
         dec_ff_dropout = 0.
     ):
         super().__init__()
-        self.token_emb = nn.Embedding(num_tokens, enc_dim)
-        self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
+        self.token_emb = nn.Embedding(num_tokens, dim)
+        self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.encoder = Transformer(
-            dim = enc_dim,
+            dim = dim,
             depth = enc_depth,
             attn_dropout = enc_attn_dropout,
-            ff_dropout = enc_ff_dropout
+            ff_dropout = enc_ff_dropout,
+            cross_attn_layers = enc_cross_attn_layers
         )
 
         self.decoder = Transformer(
-            dim = dec_dim,
+            dim = dim,
             depth = dec_depth,
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
-            causal = True
+            causal = True,
+            chunked_cross_attn = True,
+            cross_attn_layers = dec_cross_attn_layers
         )
 
-        self.to_logits = nn.Linear(dec_dim, num_tokens)
+        self.to_logits = nn.Linear(dim, num_tokens)
 
     def forward(
         self,
@@ -203,6 +255,8 @@ class RETRO(nn.Module):
 
         n, chunk_size, device = seq.shape[-1], retrieved.shape[-1], seq.device
 
+        assert divisible_by(n, chunk_size), 'sequence length must be divisible by chunk size'
+
         # embed both sequence and retrieved chunks
 
         embed = self.token_emb(seq)
@@ -217,12 +271,14 @@ class RETRO(nn.Module):
         # encode
 
         retrieved = rearrange(retrieved, 'b k n d -> (b k) n d')
-        retrieved = self.encoder(retrieved)
-        retrieved = rearrange(retrieved, '(b k) n d -> b k n d', k = chunk_size)
+        embed_as_context = rearrange(embed, 'b (k n) d -> (b k) n d', n = chunk_size)
+
+        retrieved = self.encoder(retrieved, context = embed_as_context)
+        retrieved = rearrange(retrieved, '(b k) n d -> b k n d', k = n // chunk_size)
 
         # decode
 
-        embed = self.decoder(embed)
+        embed = self.decoder(embed, context = retrieved)
 
         # project to logits
 
