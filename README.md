@@ -33,7 +33,7 @@ retro = RETRO(
 )
 
 seq = torch.randint(0, 20000, (2, 2048 + 1))      # plus one since it is split into input and labels for training
-retrieved = torch.randint(0, 20000, (2, 32, 64))  # retrieved tokens - (batch, num chunks, num retrieved neighbors, chunk_size)
+retrieved = torch.randint(0, 20000, (2, 32, 2, 128)) # retrieved tokens - (batch, num chunks, num retrieved neighbors, retrieved chunk with continuation)
 
 loss = retro(seq, retrieved, return_loss = True)
 loss.backward()

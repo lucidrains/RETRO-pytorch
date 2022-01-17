@@ -57,7 +57,7 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(t, freqs):
     seq_len = t.shape[-2]
-    freqs = freqs[:, :, -seq_len:]
+    freqs = freqs[:, :, :seq_len]
     return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
 
 # feedforward
@@ -164,29 +164,23 @@ class ChunkedCrossAttention(nn.Module):
     def forward(self, x, *, context, pos_emb = None, **kwargs):
         # derive variables
 
-        b, n, num_retrieved, chunk_size = x.shape[0], x.shape[-2], context.shape[-3], context.shape[-2]
+        b, n, num_chunks, num_retrieved, chunk_size = x.shape[0], x.shape[-2], *context.shape[-4:-1]
         causal_padding = chunk_size - 1
 
         # causal padding
 
         x = F.pad(x, (0, 0, -causal_padding, causal_padding), value = 0.)
 
-        if exists(pos_emb):
-            q_pos_emb, k_pos_emb = cast_tuple(pos_emb, num = 2)
+        # take care of rotary positional embedding
+        # make sure queries positions are properly shifted to the future
 
-            # make sure queries positions are properly shifted
-            q_pos_emb = F.pad(q_pos_emb, (0, 0, -causal_padding, causal_padding), value = 0.)
-
-            # properly chunk positional embeddings
-
-            q_pos_emb = repeat(q_pos_emb, '1 h (k n) d -> (b k) h n d', n = chunk_size, b = b)
-            k_pos_emb = repeat(k_pos_emb, '1 h (k n) d -> (b k) h (r n) d', n = chunk_size, b = b, r = num_retrieved)
-
-            pos_emb = (q_pos_emb, k_pos_emb)
+        q_pos_emb, k_pos_emb = pos_emb
+        q_pos_emb = F.pad(q_pos_emb, (0, 0, -causal_padding, causal_padding), value = 0.)
+        pos_emb = (q_pos_emb, k_pos_emb)
 
         # reshape so we have chunk to chunk attention, without breaking causality
 
-        x = rearrange(x, 'b (k n) d -> (b k) n d', n = chunk_size)
+        x = rearrange(x, 'b (k n) d -> (b k) n d', k = num_chunks)
         context = rearrange(context, 'b k r n d -> (b k) (r n) d')
 
         # cross attention
@@ -195,14 +189,16 @@ class ChunkedCrossAttention(nn.Module):
 
         # reshape back to original sequence
 
-        out = rearrange(out, '(b k) n d -> b (k n) d', k = n // chunk_size)
+        out = rearrange(out, '(b k) n d -> b (k n) d', k = num_chunks)
 
         # pad back to original, with 0s at the beginning (which will be added to the residual and be fine)
 
         out = F.pad(out, (0, 0, causal_padding, -causal_padding), value = 0.)
         return out
 
-class Transformer(nn.Module):
+# encoder and decoder classes
+
+class Encoder(nn.Module):
     def __init__(
         self,
         dim,
@@ -226,25 +222,77 @@ class Transformer(nn.Module):
 
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
-            cross_attn_klass = Attention if not chunked_cross_attn else ChunkedCrossAttention
 
             self.layers.append(nn.ModuleList([
                 Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal),
-                cross_attn_klass(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
+                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
                 FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
             ]))
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
 
-    def forward(self, x, *, context):
-        device, n = x.device, x.shape[-2]
-        pos_emb = self.rotary_pos_emb(n, device = device)
+    def forward(self, x, *, chunked_seq):
+        device, chunk_size, seq_len = x.device, x.shape[-2], chunked_seq.shape[-2]
+
+        q_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
+        k_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
         for attn, cross_attn, ff in self.layers:
-            x = attn(x, pos_emb = pos_emb) + x
+            x = attn(x, pos_emb = q_pos_emb) + x
 
             if exists(cross_attn):
-                x = cross_attn(x, context = context, pos_emb = pos_emb) + x
+                x = cross_attn(x, context = chunked_seq, pos_emb = (q_pos_emb, k_pos_emb)) + x
+
+            x = ff(x) + x
+
+        return self.norm_out(x)
+
+class Decoder(nn.Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        depth,
+        heads = 8,
+        dim_head = 64,
+        attn_dropout = 0.,
+        ff_mult = 4,
+        ff_dropout = 0.,
+        final_norm = True,
+        cross_attn_layers = None
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+
+        rotary_emb_dim = max(default(dim_head, dim_head // 2), 32)
+        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
+
+        for layer_num in range(1, depth + 1):
+            has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
+
+            self.layers.append(nn.ModuleList([
+                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True),
+                ChunkedCrossAttention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
+                FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
+            ]))
+
+        self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
+
+    def forward(self, x, *, retrieved):
+        device, seq_len, num_chunks, num_neighbors, chunk_size = x.device, x.shape[-2], *retrieved.shape[-4:-1]
+
+        self_attn_pos_emb = self.rotary_pos_emb(seq_len, device = device)
+
+        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_len // num_chunks + chunk_size, device = device)  # need to add extra chunk size, since it will be shifted
+        cross_attn_k_pos_emb = self.rotary_pos_emb(num_neighbors * chunk_size, device = device)
+
+        cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
+
+        for attn, cross_attn, ff in self.layers:
+            x = attn(x, pos_emb = self_attn_pos_emb) + x
+
+            if exists(cross_attn):
+                x = cross_attn(x, context = retrieved, pos_emb = cross_attn_pos_emb) + x
 
             x = ff(x) + x
 
@@ -278,7 +326,7 @@ class RETRO(nn.Module):
         self.to_decoder_model_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
         self.encoder_output_to_decoder_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
 
-        self.encoder = Transformer(
+        self.encoder = Encoder(
             dim = enc_dim,
             depth = enc_depth,
             attn_dropout = enc_attn_dropout,
@@ -286,13 +334,11 @@ class RETRO(nn.Module):
             cross_attn_layers = enc_cross_attn_layers
         )
 
-        self.decoder = Transformer(
+        self.decoder = Decoder(
             dim = dec_dim,
             depth = dec_depth,
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
-            causal = True,
-            chunked_cross_attn = True,
             cross_attn_layers = dec_cross_attn_layers
         )
 
@@ -326,7 +372,7 @@ class RETRO(nn.Module):
 
         # variables
 
-        n, chunk_size, num_retrieved, device = seq.shape[-1], retrieved.shape[-1], retrieved.shape[-2], seq.device
+        n, num_chunks, num_neighbors, chunk_size, device = seq.shape[-1], *retrieved.shape[-3:], seq.device
 
         assert divisible_by(n, chunk_size), 'sequence length must be divisible by chunk size'
 
@@ -343,11 +389,11 @@ class RETRO(nn.Module):
 
         # encode
 
-        retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d', r = num_retrieved)
-        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', n = chunk_size, r = num_retrieved)
+        retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d', r = num_neighbors)
+        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', k = num_chunks, r = num_neighbors)
 
-        retrieved = self.encoder(retrieved, context = embed_as_context)
-        retrieved = rearrange(retrieved, '(b k r) n d -> b k r n d', k = n // chunk_size, r = num_retrieved)
+        retrieved = self.encoder(retrieved, chunked_seq = embed_as_context)
+        retrieved = rearrange(retrieved, '(b k r) n d -> b k r n d', k = num_chunks, r = num_neighbors)
 
         # project both sequence embedding and retrieved embedding to decoder dimension if necessary
 
@@ -356,7 +402,7 @@ class RETRO(nn.Module):
 
         # decode
 
-        embed = self.decoder(embed, context = retrieved)
+        embed = self.decoder(embed, retrieved = retrieved)
 
         # project to logits
 
