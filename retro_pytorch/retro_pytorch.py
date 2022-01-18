@@ -174,9 +174,15 @@ class ChunkedCrossAttention(nn.Module):
         chunk_size = self.chunk_size
 
         b, n, num_chunks, num_retrieved = x.shape[0], x.shape[-2], *context.shape[-4:-2]
-        causal_padding = chunk_size - 1
+
+        # if sequence length less than chunk size, do an early return
+
+        if n < self.chunk_size:
+            return torch.zeros_like(x)
 
         # causal padding
+
+        causal_padding = chunk_size - 1
 
         x = F.pad(x, (0, 0, -causal_padding, causal_padding), value = 0.)
 
