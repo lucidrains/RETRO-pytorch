@@ -48,8 +48,8 @@ class RotaryEmbedding(nn.Module):
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
-    def forward(self, max_seq_len, device):
-        seq = torch.arange(max_seq_len, device = device)
+    def forward(self, max_seq_len, *, device, offset = 0):
+        seq = torch.arange(max_seq_len, device = device) + offset
         freqs = einsum('i , j -> i j', seq.type_as(self.inv_freq), self.inv_freq)
         emb = torch.cat((freqs, freqs), dim = -1)
         return rearrange(emb, 'n d -> 1 1 n d')
@@ -61,7 +61,6 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(t, freqs):
     seq_len, rot_dim = t.shape[-2], freqs.shape[-1]
-    freqs = freqs[..., :seq_len, :]
     t, t_pass = t[..., :rot_dim], t[..., rot_dim:]
     t = (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
     return torch.cat((t, t_pass), dim = -1)
@@ -277,6 +276,7 @@ class Decoder(nn.Module):
 
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
+        self.chunk_size = chunk_size
 
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
@@ -295,7 +295,7 @@ class Decoder(nn.Module):
 
         self_attn_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
-        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size + chunk_size, device = device)  # need to add extra chunk size, since it will be shifted
+        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size, device = device, offset = self.chunk_size - 1)  # need to add extra chunk size, since it will be shifted
         cross_attn_k_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
 
         cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
