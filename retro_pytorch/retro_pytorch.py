@@ -4,6 +4,10 @@ from torch import nn, einsum
 
 from einops import rearrange, repeat
 
+# constants
+
+MIN_DIM_HEAD = 32
+
 # helper functions
 
 def exists(val):
@@ -56,9 +60,11 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim = -1)
 
 def apply_rotary_pos_emb(t, freqs):
-    seq_len = t.shape[-2]
-    freqs = freqs[:, :, :seq_len]
-    return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
+    seq_len, rot_dim = t.shape[-2], freqs.shape[-1]
+    freqs = freqs[..., :seq_len, :]
+    t, t_pass = t[..., :rot_dim], t[..., rot_dim:]
+    t = (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
+    return torch.cat((t, t_pass), dim = -1)
 
 # feedforward
 
@@ -221,7 +227,7 @@ class Encoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
-        rotary_emb_dim = max(default(dim_head, dim_head // 2), 32)
+        rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
         for layer_num in range(1, depth + 1):
@@ -269,7 +275,7 @@ class Decoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
-        rotary_emb_dim = max(default(dim_head, dim_head // 2), 32)
+        rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
         for layer_num in range(1, depth + 1):
@@ -327,6 +333,8 @@ class RETRO(nn.Module):
         chunk_size = 64
     ):
         super().__init__()
+        assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
+
         self.token_emb = nn.Embedding(num_tokens, enc_dim)
         self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
 
