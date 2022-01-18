@@ -47,8 +47,8 @@ loss.backward()
 - [ ] handle indexing of corpus of text with faiss
 - [ ] handle reindexing of all nearest neighbors
 - [ ] function for getting frozen BERT embeddings for batch of chunks
-- [ ] check masking
-- [ ] inference code, autoretrieving
+- [ ] handle partially filled chunks with mask and null tokens as a safeguard
+- [ ] inference code, autoretrieving at chunk boundaries
 
 ## Citations
 
