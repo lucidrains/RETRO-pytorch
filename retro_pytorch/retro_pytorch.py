@@ -205,7 +205,7 @@ class ChunkedCrossAttention(nn.Module):
 
         # reshape back to original sequence
 
-        out = rearrange(out, '(b k) n d -> b (k n) d', k = num_chunks)
+        out = rearrange(out, '(b k) n d -> b (k n) d', b = b)
 
         # pad back to original, with 0s at the beginning (which will be added to the residual and be fine)
 
@@ -399,7 +399,7 @@ class RETRO(nn.Module):
         n, num_chunks, num_neighbors, chunk_size, device = seq.shape[-1], *retrieved.shape[-3:], seq.device
 
         assert chunk_size >= self.chunk_size, 'chunk size of retrieval input must be greater or equal to the designated chunk_size on RETRO initialization'
-        assert divisible_by(n, chunk_size), 'sequence length must be divisible by chunk size'
+        assert divisible_by(n, self.chunk_size), 'sequence length must be divisible by chunk size'
 
         # embed both sequence and retrieved chunks
 
@@ -414,8 +414,8 @@ class RETRO(nn.Module):
 
         # encode
 
-        retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d', r = num_neighbors)
-        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', k = num_chunks, r = num_neighbors)
+        retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d')
+        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', n = self.chunk_size, r = num_neighbors)
 
         retrieved = self.encoder(retrieved, chunked_seq = embed_as_context)
         retrieved = rearrange(retrieved, '(b k r) n d -> b k r n d', k = num_chunks, r = num_neighbors)
