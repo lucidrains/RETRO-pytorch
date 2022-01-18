@@ -216,8 +216,7 @@ class Encoder(nn.Module):
         ff_mult = 4,
         ff_dropout = 0.,
         final_norm = True,
-        cross_attn_layers = None,
-        chunked_cross_attn = False
+        cross_attn_layers = None
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
