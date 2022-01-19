@@ -44,10 +44,10 @@ loss.backward()
 
 ## Todo
 
+- [x] handle partially filled chunks with mask
 - [ ] handle indexing of corpus of text with faiss
 - [ ] handle reindexing of all nearest neighbors
 - [ ] function for getting frozen BERT embeddings for batch of chunks
-- [ ] handle partially filled chunks with mask and null tokens as a safeguard
 - [ ] inference code, autoretrieving at chunk boundaries
 - [ ] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
 
