@@ -17,8 +17,8 @@ setup(
     'retrieval',
   ],
   install_requires=[
+    'autofaiss',
     'einops>=0.3',
-    'faiss-gpu',
     'numpy',
     'sentencepiece',
     'torch>=1.6',
