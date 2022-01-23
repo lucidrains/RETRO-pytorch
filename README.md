@@ -167,14 +167,36 @@ ids, mask = tokenize([
 embeds = bert_embed(ids, mask, return_cls_repr = True) # (2, 768)
 ```
 
+## Fetching Nearest Neighbors (wip)
+
+You can turn your memmapped chunks numpy array into embeddings and a faiss index with one command
+
+```python
+import torch
+from retro_pytorch.retrieval import chunks_to_index_and_embed
+
+index, embeddings = chunks_to_index_and_embed(
+    num_chunks = 1000,
+    chunk_size = 64,
+    chunk_memmap_path = './train.chunks.dat'
+)
+
+query_vector = embeddings[:1]                   # use first embedding as query
+_, indices = index.search(query_vector, k = 2)  # fetch 2 neighbors, first indices should be self
+
+neighbor_embeddings = embeddings[indices]       # (1, 2, 768)
+
+```
+
+
 ## Todo
 
 - [x] handle partially filled chunks with mask
-- [ ] handle indexing of corpus of text with faiss
+- [x] handle indexing of corpus of text with faiss
+- [x] function for getting frozen BERT embeddings for batch of chunks
+- [x] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
 - [ ] handle reindexing of all nearest neighbors
-- [ ] function for getting frozen BERT embeddings for batch of chunks
 - [ ] inference code, autoretrieving at chunk boundaries
-- [ ] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
 
 ## Citations
 

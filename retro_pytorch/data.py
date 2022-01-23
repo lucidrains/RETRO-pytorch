@@ -2,14 +2,9 @@ from functools import partial
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from retro_pytorch.retrieval import EOS_ID
-from contextlib import contextmanager
 
-@contextmanager
-def memmap(*args, **kwargs):
-    pointer = np.memmap(*args, **kwargs)
-    yield pointer
-    del pointer
+from retro_pytorch.retrieval import EOS_ID
+from retro_pytorch.utils import memmap
 
 # dataset
 
