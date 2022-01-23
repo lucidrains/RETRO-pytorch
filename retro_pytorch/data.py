@@ -55,12 +55,13 @@ class RETRODataset(Dataset):
 
             # get neighbor and continuation chunks
 
-            knn_chunks = chunks_memmap[knns][..., :-1]
+            knn_chunks = chunks_memmap[knns]
+            is_last_document_chunk = np.any(knn_chunks == self.eos_id, axis = -1, keepdims = True)
 
             # use presence of [EOS] in chunk as way to detect document boundaries
             # [EOS] in BERT tokenizer is 102
 
-            is_last_document_chunk = np.any(knn_chunks == self.eos_id, axis = -1, keepdims = True)
+            knn_chunks = knn_chunks[..., :-1]
 
             continuation_indices = np.clip(knns + 1, 0, self.num_chunks - 1) # chunks are stored contiguously
             continuation_chunks = chunks_memmap[continuation_indices][..., :-1]
