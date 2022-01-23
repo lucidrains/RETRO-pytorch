@@ -20,13 +20,15 @@ class RETRODataset(Dataset):
         chunk_memmap_path,
         chunk_nn_memmap_path,
         seq_memmap_path,
-        eos_id = EOS_ID
+        eos_id = EOS_ID,
+        pad_id = 0.
     ):
         super().__init__()
         self.num_chunks = num_chunks
         self.num_sequences = num_sequences
         self.seq_num_chunks = seq_len // chunk_size
         self.eos_id = eos_id
+        self.pad_id = pad_id
 
         shape = (num_chunks, chunk_size + 1)
 
@@ -53,6 +55,11 @@ class RETRODataset(Dataset):
 
             knns = knns_memmap[chunk_range]
 
+            # derive mask for no neighbors found (-1)
+
+            no_neighbor_mask = knns == -1
+            knns = np.maximum(knns, 0)
+
             # get neighbor and continuation chunks
 
             knn_chunks = chunks_memmap[knns]
@@ -70,5 +77,9 @@ class RETRODataset(Dataset):
             # combine neighbors with continuations
 
             retrieved = np.concatenate((knn_chunks, continuation_chunks), axis = -1)
+
+            # mask out any nearest neighbor chunks that was -1 (not found at index time) to padding id
+
+            retrieved = np.where(~no_neighbor_mask[..., None], retrieved, self.pad_id)
 
         return torch.from_numpy(seq_tokens).long(), torch.from_numpy(retrieved).long()

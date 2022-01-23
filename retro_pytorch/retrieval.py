@@ -125,6 +125,9 @@ def chunks_to_embeddings_(
 
             batch_chunk = torch.from_numpy(batch_chunk_npy)
 
+            cls_tokens = torch.full((batch_chunk.shape[0], 1), SOS_ID)
+            batch_chunk = torch.cat((cls_tokens, batch_chunk), dim = 1)
+
             batch_embed = bert_embed(
                 batch_chunk,
                 return_cls_repr = use_cls_repr
