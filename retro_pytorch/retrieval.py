@@ -18,6 +18,7 @@ BERT_MODEL_DIM = 768
 BERT_VOCAB_SIZE = 30522
 
 TMP_PATH = Path('./.tmp')
+EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
 # singleton globals
 
@@ -200,14 +201,14 @@ def chunks_to_index_and_embed(
     )
 
     memmap_file_to_chunks_(
-        './train.embeddings.dat',
+        embedding_path,
         shape = embed_shape,
         dtype = np.float32,
-        folder = 'embeddings'
+        folder = EMBEDDING_TMP_SUBFOLDER
     )
 
     index = index_embeddings(
-        embeddings_folder = 'embeddings',
+        embeddings_folder = EMBEDDING_TMP_SUBFOLDER,
         **index_kwargs
     )
 
