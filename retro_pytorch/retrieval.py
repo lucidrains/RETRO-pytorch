@@ -19,7 +19,7 @@ def get_bert():
         MODEL = torch.hub.load('huggingface/pytorch-transformers', 'model', 'bert-base-cased')
     return MODEL
 
-def tokenize(texts):
+def tokenize(texts, add_special_tokens = True):
     if not isinstance(texts, (list, tuple)):
         texts = [texts]
 
@@ -27,8 +27,8 @@ def tokenize(texts):
 
     encoding = tokenizer.batch_encode_plus(
         texts,
+        add_special_tokens = add_special_tokens,
         padding = True,
-        add_special_tokens = True,
         return_attention_mask = True,
         return_tensors = 'pt'
     )
