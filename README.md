@@ -141,30 +141,28 @@ This repository will use the default tokenizer (sentencepiece) for the cased ver
 ex. masked mean pooled representation
 
 ```python
-import torch
 from retro_pytorch.retrieval import bert_embed, tokenize
 
-ids, mask = tokenize([
+ids = tokenize([
     'hello world',
     'foo bar'
 ])
 
-embeds = bert_embed(ids, mask) # (2, 768) - 768 is hidden dimension of BERT
+embeds = bert_embed(ids) # (2, 768) - 768 is hidden dimension of BERT
 ```
 
 ex. CLS token representation
 
 
 ```python
-import torch
 from retro_pytorch.retrieval import bert_embed, tokenize
 
-ids, mask = tokenize([
+ids = tokenize([
     'hello world',
     'foo bar'
 ])
 
-embeds = bert_embed(ids, mask, return_cls_repr = True) # (2, 768)
+embeds = bert_embed(ids, return_cls_repr = True) # (2, 768)
 ```
 
 ## Fetching Nearest Neighbors (wip)
@@ -172,7 +170,6 @@ embeds = bert_embed(ids, mask, return_cls_repr = True) # (2, 768)
 You can turn your memmapped chunks numpy array into embeddings and a faiss index with one command
 
 ```python
-import torch
 from retro_pytorch.retrieval import chunks_to_index_and_embed
 
 index, embeddings = chunks_to_index_and_embed(

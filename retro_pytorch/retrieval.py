@@ -54,28 +54,27 @@ def tokenize(texts, add_special_tokens = True):
         texts,
         add_special_tokens = add_special_tokens,
         padding = True,
-        return_attention_mask = True,
         return_tensors = 'pt'
     )
 
     token_ids = encoding.input_ids
-    mask = encoding.attention_mask
-    return token_ids, mask
+    return token_ids
 
 # embedding function
 
 @torch.no_grad()
 def bert_embed(
     token_ids,
-    mask = None,
     return_cls_repr = False,
-    eps = 1e-8
+    eps = 1e-8,
+    pad_id = 0.
 ):
     model = get_bert()
+    mask = token_ids != pad_id
 
     outputs = model(
         input_ids = token_ids,
-        attention_mask = None,
+        attention_mask = mask,
         output_hidden_states = True
     )
 
@@ -125,11 +124,9 @@ def chunks_to_embeddings_(
             batch_chunk_npy = chunks[dim_slice]
 
             batch_chunk = torch.from_numpy(batch_chunk_npy)
-            batch_mask = batch_chunk != pad_id
 
             batch_embed = bert_embed(
                 batch_chunk,
-                mask = batch_mask,
                 return_cls_repr = use_cls_repr
             )
 
