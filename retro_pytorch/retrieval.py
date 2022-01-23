@@ -3,6 +3,7 @@ from einops import rearrange
 
 MODEL = None
 TOKENIZER = None
+BERT_VOCAB_SIZE = 30522
 
 def exists(val):
     return val is not None

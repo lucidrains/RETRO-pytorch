@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 
+from retro_pytorch.retrieval import BERT_VOCAB_SIZE
 from einops import rearrange, repeat
 
 # constants
@@ -335,7 +336,7 @@ class RETRO(nn.Module):
     def __init__(
         self,
         *,
-        num_tokens,
+        num_tokens = BERT_VOCAB_SIZE,
         max_seq_len = 2048,
         enc_dim = 896,
         enc_depth = 2,

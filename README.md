@@ -44,6 +44,116 @@ loss.backward()
 # do above for many steps
 ```
 
+## RETRO Datasets (wip)
+
+The `RETRODataset` class accepts paths to a number of memmapped numpy arrays containing the chunks, masking, continuation, and pre-calculated neighbors. You can use this to easily assemble the data for `RETRO` training.
+
+
+```python
+import torch
+from torch.utils.data import DataLoader
+from retro_pytorch import RETRO, RETRODataset
+
+# mock data constants
+
+import numpy as np
+
+NUM_CHUNKS = 1000
+CHUNK_SIZE = 64
+NUM_SEQS = 100
+NUM_NEIGHBORS = 2
+
+def save_memmap(path, tensor):
+    f = np.memmap(path, dtype = tensor.dtype, mode = 'w+', shape = tensor.shape)
+    f[:] = tensor
+    del f
+
+SHAPE = (NUM_CHUNKS, CHUNK_SIZE + 1)
+
+# generate mock chunk data
+
+save_memmap(
+    './train.chunks.dat',
+    np.int32(np.random.randint(0, 8192, size = SHAPE))
+)
+
+# generate mock masking data
+
+save_memmap(
+    './train.chunks.mask.dat',
+    np.full(SHAPE, True)
+)
+
+# generate chunk continuation indices
+
+save_memmap(
+    './train.chunks.continuation.dat',
+    np.int32(np.arange(1, 1001))
+)
+
+# generate nearest neighbors for each chunk
+
+save_memmap(
+    './train.chunks.knn.dat',
+    np.int32(np.random.randint(0, 1000, size = (NUM_CHUNKS, NUM_NEIGHBORS)))
+)
+
+# generate seq data
+
+save_memmap(
+    './train.seq.dat',
+    np.int32(np.random.randint(0, 128, size = (NUM_SEQS,)))
+)
+
+# instantiate dataset class
+# which constructs the sequence and neighbors from memmapped chunk and neighbor information
+
+ds = RETRODataset(
+    num_sequences = NUM_SEQS,
+    num_chunks = NUM_CHUNKS,
+    num_neighbors = NUM_NEIGHBORS,
+    chunk_size = CHUNK_SIZE,
+    seq_len = 2048,
+    chunk_memmap_path = './train.chunks.dat',
+    chunk_continuation_memmap_path = './train.chunks.continuation.dat',
+    chunk_nn_memmap_path = './train.chunks.continuation.dat',
+    seq_memmap_path = './train.seq.dat',
+    mask_memmap_path = './train.chunks.mask.dat',
+)
+
+dl = iter(DataLoader(ds, batch_size = 2))
+
+# one forwards and backwards
+
+retro = RETRO(
+    max_seq_len = 2048,                      # max sequence length
+    enc_dim = 896,                           # encoder model dimension
+    enc_depth = 3,                           # encoder depth
+    dec_dim = 768,                           # decoder model dimensions
+    dec_depth = 12,                          # decoder depth
+    dec_cross_attn_layers = (1, 3, 6, 9),    # decoder cross attention layers (with causal chunk cross attention)
+    heads = 8,                               # attention heads
+    dim_head = 64,                           # dimension per head
+    dec_attn_dropout = 0.25,                 # decoder attention dropout
+    dec_ff_dropout = 0.25                    # decoder feedforward dropout
+).cuda()
+
+seq, retrieved, mask, = map(lambda t: t.cuda(), next(dl))
+
+# seq       - (2, 2049)         - 1 extra token since split by seq[:, :-1], seq[:, 1:]
+# retrieved - (2, 32, 2, 128)   - 128 since chunk + continuation, each 64 tokens
+# mask      - (2, 32, 2, 128)   - masking for retrieved chunks, due to partially filled chunks, or blank continuations (<eos> in chunk)
+
+loss = retro(
+    seq,
+    retrieved,
+    mask = mask,
+    return_loss = True
+)
+
+loss.backward()
+```
+
 ## Retrieval related tools (wip)
 
 This repository will use the default tokenizer (sentencepiece) for the cased version of BERT. Embeddings will be fetched from the vanilla BERT, and can either be masked mean pooled representation, or the CLS token.
