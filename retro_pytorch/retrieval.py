@@ -111,7 +111,7 @@ def chunks_to_embeddings_(
     chunk_size = 64,
     embed_dim = BERT_MODEL_DIM,
     batch_size = 16,
-    return_cls_repr = False,
+    use_cls_repr = False,
     pad_id = 0.
 ):
     chunks_shape = (num_chunks, chunk_size + 1)
@@ -130,7 +130,7 @@ def chunks_to_embeddings_(
             batch_embed = bert_embed(
                 batch_chunk,
                 mask = batch_mask,
-                return_cls_repr = return_cls_repr
+                return_cls_repr = use_cls_repr
             )
 
             embeddings[dim_slice] = batch_embed.detach().cpu().numpy()
@@ -143,7 +143,7 @@ def memmap_file_to_chunks_(
     folder,
     shape,
     dtype,
-    max_rows_per_file = 100
+    max_rows_per_file = 500
 ):
     rows, _ = shape
 
@@ -188,23 +188,31 @@ def chunks_to_index_and_embed(
     num_chunks,
     chunk_size,
     chunk_memmap_path,
+    use_cls_repr = False,
+    max_rows_per_file = 500,
+    chunks_to_embeddings_batch_size = 16,
+    embed_dim = BERT_MODEL_DIM,
     **index_kwargs
 ):
     embedding_path = f'{chunk_memmap_path}.embedded'
-    embed_shape = (num_chunks, BERT_MODEL_DIM)
+    embed_shape = (num_chunks, embed_dim)
 
     chunks_to_embeddings_(
         num_chunks = num_chunks,
         chunk_size = chunk_size,
         chunks_memmap_path = chunk_memmap_path,
-        embeddings_memmap_path = embedding_path
+        embeddings_memmap_path = embedding_path,
+        use_cls_repr = use_cls_repr,
+        batch_size = chunks_to_embeddings_batch_size,
+        embed_dim = embed_dim
     )
 
     memmap_file_to_chunks_(
         embedding_path,
         shape = embed_shape,
         dtype = np.float32,
-        folder = EMBEDDING_TMP_SUBFOLDER
+        folder = EMBEDDING_TMP_SUBFOLDER,
+        max_rows_per_file = max_rows_per_file
     )
 
     index = index_embeddings(
