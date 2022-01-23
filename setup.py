@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'retro-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.0.12',
+  version = '0.0.14',
   license='MIT',
   description = 'RETRO - Retrieval Enhanced Transformer - Pytorch',
   author = 'Phil Wang',
@@ -20,6 +20,7 @@ setup(
     'einops>=0.3',
     'faiss-gpu',
     'numpy',
+    'sentencepiece',
     'torch>=1.6',
     'tqdm'
   ],

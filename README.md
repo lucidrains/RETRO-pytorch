@@ -42,6 +42,39 @@ loss.backward()
 # do above for many steps
 ```
 
+## Retrieval related tools (wip)
+
+This repository will use the default tokenizer (sentencepiece) for the cased version of BERT. Embeddings will be fetched from the vanilla BERT, and can either be masked mean pooled representation, or the CLS token.
+
+ex. masked mean pooled representation
+
+```python
+import torch
+from retro_pytorch.retrieval import bert_embed, tokenize
+
+ids, mask = tokenize([
+    'hello world',
+    'foo bar'
+])
+
+embeds = bert_embed(ids, mask) # (2, 768) - 768 is hidden dimension of BERT
+```
+
+ex. CLS token representation
+
+
+```python
+import torch
+from retro_pytorch.retrieval import bert_embed, tokenize
+
+ids, mask = tokenize([
+    'hello world',
+    'foo bar'
+])
+
+embeds = bert_embed(ids, mask, return_cls_repr = True) # (2, 768)
+```
+
 ## Todo
 
 - [x] handle partially filled chunks with mask
