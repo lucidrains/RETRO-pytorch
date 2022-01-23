@@ -21,7 +21,6 @@ import torch
 from retro_pytorch import RETRO
 
 retro = RETRO(
-    num_tokens = 20000,                      # number of tokens
     chunk_size = 64,                         # the chunk size that is indexed and retrieved (needed for proper relative positions as well as causal chunked cross attention)
     max_seq_len = 2048,                      # max sequence length
     enc_dim = 896,                           # encoder model dim
