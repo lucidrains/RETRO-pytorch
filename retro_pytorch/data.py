@@ -50,14 +50,8 @@ class RETRODataset(Dataset):
         knn_chunks = self.chunks[knns]
         knn_masks = self.masks[knns]
 
-        continuation_shape = continuations.shape
-        continuations = continuations.flatten()
-
         continuation_chunks = self.chunks[continuations]
         continuation_masks = self.masks[continuations]
-
-        continuation_chunks = continuation_chunks.reshape(*continuation_shape, -1)
-        continuation_masks = continuation_masks.reshape(*continuation_shape, -1)
 
         # combine neighbors with continuations
 

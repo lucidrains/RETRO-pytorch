@@ -411,7 +411,7 @@ class RETRO(nn.Module):
 
         # variables
 
-        n, num_chunks, num_neighbors, chunk_size, device = seq.shape[-1], *retrieved.shape[-3:], seq.device
+        n, num_chunks, num_neighbors, chunk_size, retrieved_shape, device = seq.shape[-1], *retrieved.shape[-3:], retrieved.shape, seq.device
 
         assert chunk_size >= self.chunk_size, 'chunk size of retrieval input must be greater or equal to the designated chunk_size on RETRO initialization'
         assert divisible_by(n, self.chunk_size), 'sequence length must be divisible by chunk size'
@@ -432,6 +432,7 @@ class RETRO(nn.Module):
         encoder_retrieved_mask = decoder_retrieved_mask = None
 
         if exists(mask):
+            assert mask.shape == retrieved_shape, 'retrieval mask must be of the same shape as the retrieval tokens'
             encoder_retrieved_mask = rearrange(mask, 'b k r n -> (b k r) n')
             decoder_retrieved_mask = mask
 
