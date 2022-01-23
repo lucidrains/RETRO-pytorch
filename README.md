@@ -4,6 +4,8 @@
 
 Implementation of <a href="https://arxiv.org/abs/2112.04426">RETRO</a>, Deepmind's Retrieval based Attention net, in Pytorch. This will deviate from the paper slightly, using rotary embeddings for relative positional encoding, as well as Faiss library instead of Scann.
 
+This library leverages <a href="https://github.com/criteo/autofaiss">autofaiss</a> for building the index and calculating the k-nearest neighbors for all chunks.
+
 If you are interested, please join <a href="https://discord.gg/3AvcJfbEBd">this Discord</a> for discussions
 
 ## Install
