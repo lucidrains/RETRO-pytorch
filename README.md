@@ -76,20 +76,6 @@ save_memmap(
     np.int32(np.random.randint(0, 8192, size = SHAPE))
 )
 
-# generate mock masking data
-
-save_memmap(
-    './train.chunks.mask.dat',
-    np.full(SHAPE, True)
-)
-
-# generate chunk continuation indices
-
-save_memmap(
-    './train.chunks.continuation.dat',
-    np.int32(np.arange(1, 1001))
-)
-
 # generate nearest neighbors for each chunk
 
 save_memmap(
@@ -114,10 +100,8 @@ ds = RETRODataset(
     chunk_size = CHUNK_SIZE,
     seq_len = 2048,
     chunk_memmap_path = './train.chunks.dat',
-    chunk_continuation_memmap_path = './train.chunks.continuation.dat',
-    chunk_nn_memmap_path = './train.chunks.continuation.dat',
-    seq_memmap_path = './train.seq.dat',
-    mask_memmap_path = './train.chunks.mask.dat',
+    chunk_nn_memmap_path = './train.chunks.knn.dat',
+    seq_memmap_path = './train.seq.dat'
 )
 
 dl = iter(DataLoader(ds, batch_size = 2))
@@ -137,20 +121,19 @@ retro = RETRO(
     dec_ff_dropout = 0.25                    # decoder feedforward dropout
 ).cuda()
 
-seq, retrieved, mask, = map(lambda t: t.cuda(), next(dl))
+seq, retrieved = map(lambda t: t.cuda(), next(dl))
 
 # seq       - (2, 2049)         - 1 extra token since split by seq[:, :-1], seq[:, 1:]
 # retrieved - (2, 32, 2, 128)   - 128 since chunk + continuation, each 64 tokens
-# mask      - (2, 32, 2, 128)   - masking for retrieved chunks, due to partially filled chunks, or blank continuations (<eos> in chunk)
 
 loss = retro(
     seq,
     retrieved,
-    mask = mask,
     return_loss = True
 )
 
 loss.backward()
+
 ```
 
 ## Retrieval related tools (wip)

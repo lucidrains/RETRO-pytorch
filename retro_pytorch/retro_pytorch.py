@@ -350,11 +350,13 @@ class RETRO(nn.Module):
         enc_ff_dropout = 0.,
         dec_attn_dropout = 0.,
         dec_ff_dropout = 0.,
-        chunk_size = 64
+        chunk_size = 64,
+        pad_id = 0.
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
 
+        self.pad_id = pad_id
         self.token_emb = nn.Embedding(num_tokens, enc_dim)
         self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
 
@@ -386,7 +388,6 @@ class RETRO(nn.Module):
         self,
         seq,
         retrieved,
-        mask = None,
         return_loss = False
     ):
         """
@@ -398,6 +399,10 @@ class RETRO(nn.Module):
         """
 
         assert not (return_loss and not self.training), 'must be training if returning loss'
+
+        # assume padding token id (usually 0.) is to be masked out
+
+        mask = retrieved == self.pad_id
 
         # handle some user inputs
 

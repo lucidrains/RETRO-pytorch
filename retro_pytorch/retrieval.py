@@ -1,9 +1,18 @@
 import torch
 from einops import rearrange
 
+# constants
+
+SOS_ID = 101
+EOS_ID = 102
+BERT_VOCAB_SIZE = 30522
+
+# singleton globals
+
 MODEL = None
 TOKENIZER = None
-BERT_VOCAB_SIZE = 30522
+
+# functions
 
 def exists(val):
     return val is not None
@@ -19,6 +28,8 @@ def get_bert():
     if not exists(MODEL):
         MODEL = torch.hub.load('huggingface/pytorch-transformers', 'model', 'bert-base-cased')
     return MODEL
+
+# tokenize
 
 def tokenize(texts, add_special_tokens = True):
     if not isinstance(texts, (list, tuple)):
@@ -37,6 +48,8 @@ def tokenize(texts, add_special_tokens = True):
     token_ids = encoding.input_ids
     mask = encoding.attention_mask
     return token_ids, mask
+
+# embedding function
 
 def bert_embed(
     token_ids,

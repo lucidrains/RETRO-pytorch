@@ -2,6 +2,7 @@ from functools import partial
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from retro_pytorch.retrieval import EOS_ID
 from contextlib import contextmanager
 
 @contextmanager
@@ -18,23 +19,23 @@ class RETRODataset(Dataset):
         *,
         num_chunks,
         chunk_size,
+        seq_len,
         num_sequences,
         num_neighbors,
         chunk_memmap_path,
-        chunk_continuation_memmap_path,
         chunk_nn_memmap_path,
         seq_memmap_path,
-        mask_memmap_path = None,
-        seq_len = 2048
+        eos_id = EOS_ID
     ):
         super().__init__()
+        self.num_chunks = num_chunks
         self.num_sequences = num_sequences
         self.seq_num_chunks = seq_len // chunk_size
+        self.eos_id = eos_id
+
         shape = (num_chunks, chunk_size + 1)
 
         self.get_chunks = partial(memmap, chunk_memmap_path, dtype = np.int32, shape = shape)
-        self.get_masks = partial(memmap, mask_memmap_path, dtype = np.bool, shape = shape)
-        self.get_continuations = partial(memmap, chunk_continuation_memmap_path, dtype = np.int32, shape = (num_chunks,))
         self.get_knns = partial(memmap, chunk_nn_memmap_path, dtype = np.int32, shape = (num_chunks, num_neighbors))
         self.get_seqs = partial(memmap, seq_memmap_path, dtype = np.int32, shape = (num_sequences,))
 
@@ -42,7 +43,7 @@ class RETRODataset(Dataset):
         return self.num_sequences
 
     def __getitem__(self, ind):
-        with self.get_chunks() as chunks_memmap, self.get_masks() as masks_memmap, self.get_continuations() as continuations_memmap, self.get_knns() as knns_memmap, self.get_seqs() as seqs_memmap:
+        with self.get_chunks() as chunks_memmap, self.get_knns() as knns_memmap, self.get_seqs() as seqs_memmap:
 
             begin_chunk_index = seqs_memmap[ind]
             chunk_range = slice(begin_chunk_index, (begin_chunk_index + self.seq_num_chunks))
@@ -50,22 +51,28 @@ class RETRODataset(Dataset):
             chunks = chunks_memmap[chunk_range]
 
             # excise the last token, except for last token of last chunk
+
             seq_tokens = np.concatenate((chunks[:, :-1].flatten(), chunks[-1, -1:]))
 
             # derive retrieved tokens
+
             knns = knns_memmap[chunk_range]
-            continuations = continuations_memmap[knns]
 
             # get neighbor and continuation chunks
-            knn_chunks = chunks_memmap[knns]
-            knn_masks = masks_memmap[knns]
 
-            continuation_chunks = chunks_memmap[continuations]
-            continuation_masks = masks_memmap[continuations]
+            knn_chunks = chunks_memmap[knns][..., :-1]
+
+            # use presence of [EOS] in chunk as way to detect document boundaries
+            # [EOS] in BERT tokenizer is 102
+
+            is_last_document_chunk = np.any(knn_chunks == self.eos_id, axis = -1, keepdims = True)
+
+            continuation_indices = np.clip(knns + 1, 0, self.num_chunks - 1) # chunks are stored contiguously
+            continuation_chunks = chunks_memmap[continuation_indices][..., :-1]
+            continuation_chunks *= ~is_last_document_chunk
 
             # combine neighbors with continuations
 
-            retrieved = np.concatenate((knn_chunks[..., :-1], continuation_chunks[..., :-1]), axis = -1)
-            retrieved_masks = np.concatenate((knn_masks[..., :-1], continuation_masks[..., :-1]), axis = -1)
+            retrieved = np.concatenate((knn_chunks, continuation_chunks), axis = -1)
 
-        return torch.from_numpy(seq_tokens).long(), torch.from_numpy(retrieved).long(), torch.from_numpy(retrieved_masks)
+        return torch.from_numpy(seq_tokens).long(), torch.from_numpy(retrieved).long()
