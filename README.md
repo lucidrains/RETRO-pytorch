@@ -67,13 +67,11 @@ def save_memmap(path, tensor):
     f[:] = tensor
     del f
 
-SHAPE = (NUM_CHUNKS, CHUNK_SIZE + 1)
-
 # generate mock chunk data
 
 save_memmap(
     './train.chunks.dat',
-    np.int32(np.random.randint(0, 8192, size = SHAPE))
+    np.int32(np.random.randint(0, 8192, size = (NUM_CHUNKS, CHUNK_SIZE + 1)))
 )
 
 # generate nearest neighbors for each chunk
