@@ -379,6 +379,10 @@ def chunks_to_precalculated_knn_(
             indices = np.where(neighbor_from_same_doc, -1, indices)
             distances = np.where(neighbor_from_same_doc, 1e3, distances)
 
+            # re-sort indices by updated distances
+
+            indices = np.take_along_axis(indices, np.argsort(distances, axis = 1), axis = 1)
+
             # store nearest neighbors to knn memmap
 
             knns[dim_slice] = indices[:, :num_nearest_neighbors]

@@ -232,9 +232,9 @@ chunks_to_precalculated_knn_(
 - [x] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
 - [x] handle reindexing of all nearest neighbors
 - [x] single text file to chunk.npy and seq_begin_indices.npy, handling <sos>, <eos> as well as extra token for autoregressive training
+- [x] chunks_to_precalculated_knn_ needs to filter out documents other than self through some tensor magic
+- [x] function to calculate document id assuming <eos> is present
 - [ ] inference code, autoretrieving at chunk boundaries
-- [ ] chunks_to_precalculated_knn_ needs to filter out documents other than self through some tensor magic
-- [ ] function to calculate document id assuming <eos> is present
 
 ## Citations
 
