@@ -207,8 +207,11 @@ chunks_to_precalculated_knn_(
 - [x] handle indexing of corpus of text with faiss
 - [x] function for getting frozen BERT embeddings for batch of chunks
 - [x] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
-- [ ] handle reindexing of all nearest neighbors
+- [x] handle reindexing of all nearest neighbors
 - [ ] inference code, autoretrieving at chunk boundaries
+- [ ] single text file to chunk.npy and seq_begin_indices.npy, handling <sos>, <eos> as well as extra token for autoregressive training
+- [ ] chunks_to_precalculated_knn_ needs to filter out documents other than self through some tensor magic
+- [ ] function to calculate document id assuming <eos> is present
 
 ## Citations
 
