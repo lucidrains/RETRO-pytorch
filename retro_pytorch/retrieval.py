@@ -1,5 +1,4 @@
 from pathlib import Path
-from shutil import rmtree
 from math import ceil
 
 import torch
@@ -27,11 +26,6 @@ EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
 def exists(val):
     return val is not None
-
-def safe_cat(a, b, dim = 0):
-    if a is None:
-        return b
-    return torch.cat((a, b), dim = dim)
 
 def range_chunked(max_value, *, batch_size):
     counter = 0
