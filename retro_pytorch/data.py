@@ -51,6 +51,12 @@ class RETRODataset(Dataset):
 
             seq_tokens = np.concatenate((chunks[:, :-1].flatten(), chunks[-1, -1:]))
 
+            # mask out (with padding tokens) any token following an <eos> | disallow having more than 1 document in a sequence, as it would break RETRO's CCA
+
+            seq_mask = np.cumsum(seq_tokens == self.eos_id, axis = 0)
+            seq_mask = np.pad(seq_mask, (1, 0))[:-1] == 0.
+            seq_tokens = np.where(seq_mask, seq_tokens, 0.)
+
             # derive retrieved tokens
 
             knns = knns_memmap[chunk_range]
@@ -82,4 +88,6 @@ class RETRODataset(Dataset):
 
             retrieved = np.where(~no_neighbor_mask[..., None], retrieved, self.pad_id)
 
-        return torch.from_numpy(seq_tokens).long(), torch.from_numpy(retrieved).long()
+        seq_tokens_torch = torch.from_numpy(seq_tokens).long()
+        retrieved_torch = torch.from_numpy(retrieved).long()
+        return seq_tokens_torch, retrieved_torch

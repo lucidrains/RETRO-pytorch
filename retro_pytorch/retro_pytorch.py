@@ -351,7 +351,7 @@ class RETRO(nn.Module):
         dec_attn_dropout = 0.,
         dec_ff_dropout = 0.,
         chunk_size = 64,
-        pad_id = 0.
+        pad_id = 0
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
@@ -467,5 +467,5 @@ class RETRO(nn.Module):
 
         # cross entropy loss
 
-        loss = F.cross_entropy(rearrange(logits, 'b n c -> b c n'), labels)
+        loss = F.cross_entropy(rearrange(logits, 'b n c -> b c n'), labels, ignore_index = self.pad_id)
         return loss
