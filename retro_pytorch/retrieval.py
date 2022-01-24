@@ -112,7 +112,7 @@ def doc_text_to_chunks_and_seq_indices(
 
     chunks_with_extra_token = torch.cat((ids, all_last_tokens), dim = -1)
 
-    # calculate random beginning chunk indices starting at 0, spaced seq len apart
+    # calculate chunk indices starting at 0, spaced number of chunks of seq len apart
 
     total_chunks = ids.shape[0]
     num_chunks_per_seq = seq_len // chunk_size
