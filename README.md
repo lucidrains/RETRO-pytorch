@@ -78,7 +78,9 @@ wrapper = TrainingWrapper(
     doc_ids_memmap_path = './train.doc_ids.dat',   # path to document ids per chunk (used for filtering neighbors belonging to same document)
     max_chunks = 1_000_000,                        # maximum cap to chunks
     max_seqs = 100_000,                            # maximum seqs
-    knn_extra_neighbors = 100                      # num extra neighbors to fertch
+    knn_extra_neighbors = 100,                     # num extra neighbors to fetch
+    max_index_memory_usage = '100m',
+    current_memory_available = '1G'
 )
 
 # get the dataloader and optimizer (AdamW with all the correct settings)

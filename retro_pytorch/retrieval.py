@@ -350,7 +350,8 @@ def chunks_to_precalculated_knn_(
     index, embeddings = chunks_to_index_and_embed(
         num_chunks = num_chunks,
         chunk_size = chunk_size,
-        chunk_memmap_path = chunk_memmap_path
+        chunk_memmap_path = chunk_memmap_path,
+        **index_kwargs
     )
 
     chunk_path = Path(chunk_memmap_path)
