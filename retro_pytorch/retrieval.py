@@ -120,43 +120,58 @@ def doc_text_to_chunks_and_seq_indices(
 
     return chunks_with_extra_token, seq
 
-def text_folder_to_chunks_and_seqs_(
+def text_folder_to_chunks_(
     *,
     folder,
-    chunks_npy_path,
-    seqs_npy_path,
+    chunks_memmap_path,
+    seqs_memmap_path,
+    doc_ids_memmap_path,
     chunk_size = 64,
     seq_len = 2048,
-    glob = '**/*.txt'
+    glob = '**/*.txt',
+    max_chunks = 1_000_000,
+    max_seqs = 100_000,
+    max_docs = 10_000
 ):
     paths = sorted([*Path(folder).glob(glob)])
 
-    num_chunks = 0
-    total_seq_len = 0
+    total_chunks = 0
+    total_docs = 0
+    total_seqs = 0
 
-    all_chunks = None
-    all_seq = None
+    chunks_shape = (max_chunks, chunk_size + 1)
+    seqs_shape = (max_seqs,)
+    doc_ids_shape = (max_docs,)
 
-    for path in paths:
-        print(f'processing {path}')
+    with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32, mode = 'w+') as chunks_memmap\
+        , memmap(seqs_memmap_path, shape = seqs_shape, dtype = np.int32, mode = 'w+') as seqs_memmap\
+        , memmap(doc_ids_memmap_path, shape = doc_ids_shape, dtype = np.int32, mode = 'w+') as doc_ids_memmap:
 
-        chunks, seq = doc_text_to_chunks_and_seq_indices(
-            doc_text = path.read_text(),
-            chunk_size = chunk_size,
-            seq_len = seq_len
-        )
+        for path in paths:
+            print(f'processing {path}')
 
-        doc_chunk_len = chunks.shape[0]
-        doc_seq_len = seq.shape[0]
+            chunks, seq = doc_text_to_chunks_and_seq_indices(
+                doc_text = path.read_text(),
+                chunk_size = chunk_size,
+                seq_len = seq_len
+            )
 
-        all_chunks = safe_cat(all_chunks, chunks)
-        all_seq = safe_cat(all_seq, seq + total_seq_len) # add offset to chunk start indices
+            doc_chunk_len = chunks.shape[0]
+            doc_seq_len = seq.shape[0]
 
-        num_chunks += doc_chunk_len
-        total_seq_len += doc_seq_len
+            chunks_memmap[total_chunks:(total_chunks + doc_chunk_len)] = chunks.numpy()
+            seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy()
+            doc_ids_memmap[total_chunks:(total_chunks + doc_chunk_len)] = np.full((doc_chunk_len,), total_docs)
 
-    np.save(chunks_npy_path, all_chunks.numpy())
-    np.save(seqs_npy_path, all_seq.numpy())
+            total_chunks += doc_chunk_len
+            total_seqs += doc_seq_len
+            total_docs += 1
+
+    return dict(
+        chunks = total_chunks,
+        docs = total_docs,
+        seqs = total_seqs
+    )
 
 # embedding function
 

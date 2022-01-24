@@ -167,25 +167,24 @@ ids = tokenize([
 embeds = bert_embed(ids, return_cls_repr = True) # (2, 768)
 ```
 
-Create your chunks and chunk start indices using `text_folder_to_chunks_and_seqs_`
+Create your chunks and chunk start indices (for calculating sequence ranges for autoregressive training) using `text_folder_to_chunks_`
 
 ```python
-from retro_pytorch.retrieval import text_folder_to_chunks_and_seqs_
+from retro_pytorch.retrieval import text_folder_to_chunks_
 
-text_folder_to_chunks_and_seqs_(
-    folder = './folder',
+stats = text_folder_to_chunks_(
+    folder = './text_folder',
     glob = '**/*.txt',
-    chunks_npy_path = './train.chunks.npy',
-    seqs_npy_path = './train.seq.npy',
+    chunks_memmap_path = './train.chunks.dat',
+    seqs_memmap_path = './train.seq.dat',
+    doc_ids_memmap_path = './train.doc_ids.dat',  # document ids are needed for filtering out neighbors belonging to same document appropriately during computation of nearest neighbors
     chunk_size = 64,
     seq_len = 2048,
+    max_chunks = 1_000_000,
+    max_seqs = 100_000
 )
 
-# looks for all text files within ./folder
-# and saves the chunks to train.chunks.npy
-# and the sequence start indices to train.seq.npy
-
-# TODO (make efficient and convert to memmap)
+# {'chunks': <number of chunks>, 'docs': <number of documents>, 'seqs': <number of sequences>}
 ```
 
 ## Fetching Nearest Neighbors (wip)
