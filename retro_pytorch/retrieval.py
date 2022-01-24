@@ -154,7 +154,7 @@ def text_folder_to_chunks_(
             doc_seq_len = seq.shape[0]
 
             chunks_memmap[total_chunks:(total_chunks + doc_chunk_len)] = chunks.numpy()
-            seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy()
+            seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy() + total_chunks
             doc_ids_memmap[total_chunks:(total_chunks + doc_chunk_len)] = np.full((doc_chunk_len,), total_docs)
 
             total_chunks += doc_chunk_len

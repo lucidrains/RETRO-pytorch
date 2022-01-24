@@ -31,11 +31,14 @@ class RETRODataset(Dataset):
         self.eos_id = eos_id
         self.pad_id = pad_id
 
-        shape = (num_chunks, chunk_size + 1)
+        num_chunks_with_padding = num_chunks + self.seq_num_chunks
+
+        chunks_shape = (num_chunks_with_padding, chunk_size + 1)
+        knn_shape = (num_chunks_with_padding, num_neighbors)
 
         self.add_continuations = add_continuations
-        self.get_chunks = partial(memmap, chunk_memmap_path, dtype = np.int32, shape = shape)
-        self.get_knns = partial(memmap, chunk_nn_memmap_path, dtype = np.int32, shape = (num_chunks, num_neighbors))
+        self.get_chunks = partial(memmap, chunk_memmap_path, dtype = np.int32, shape = chunks_shape)
+        self.get_knns = partial(memmap, chunk_nn_memmap_path, dtype = np.int32, shape = knn_shape)
         self.get_seqs = partial(memmap, seq_memmap_path, dtype = np.int32, shape = (num_sequences,))
 
     def __len__(self):
@@ -43,7 +46,6 @@ class RETRODataset(Dataset):
 
     def __getitem__(self, ind):
         with self.get_chunks() as chunks_memmap, self.get_knns() as knns_memmap, self.get_seqs() as seqs_memmap:
-
             begin_chunk_index = seqs_memmap[ind]
             chunk_range = slice(begin_chunk_index, (begin_chunk_index + self.seq_num_chunks))
 
