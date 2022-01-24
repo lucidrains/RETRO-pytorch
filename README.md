@@ -45,7 +45,9 @@ loss.backward()
 
 ## RETRO Datasets (wip)
 
-The `RETRODataset` class accepts paths to a number of memmapped numpy arrays containing the chunks, masking, continuation, and pre-calculated neighbors. You can use this to easily assemble the data for `RETRO` training.
+The `RETRODataset` class accepts paths to a number of memmapped numpy arrays containing the chunks, the index of the first chunk in the sequence to be trained on (in RETRO decoder), and the pre-calculated indices of the k-nearest neighbors per chunk.
+
+You can use this to easily assemble the data for `RETRO` training.
 
 
 ```python
@@ -91,7 +93,7 @@ save_memmap(
 # instantiate dataset class
 # which constructs the sequence and neighbors from memmapped chunk and neighbor information
 
-ds = RETRODataset(
+train_ds = RETRODataset(
     num_sequences = NUM_SEQS,
     num_chunks = NUM_CHUNKS,
     num_neighbors = NUM_NEIGHBORS,
@@ -102,7 +104,7 @@ ds = RETRODataset(
     seq_memmap_path = './train.seq.dat'
 )
 
-dl = iter(DataLoader(ds, batch_size = 2))
+train_dl = iter(DataLoader(train_ds, batch_size = 2))
 
 # one forwards and backwards
 
@@ -119,7 +121,7 @@ retro = RETRO(
     dec_ff_dropout = 0.25                    # decoder feedforward dropout
 ).cuda()
 
-seq, retrieved = map(lambda t: t.cuda(), next(dl))
+seq, retrieved = map(lambda t: t.cuda(), next(train_dl))
 
 # seq       - (2, 2049)         - 1 extra token since split by seq[:, :-1], seq[:, 1:]
 # retrieved - (2, 32, 2, 128)   - 128 since chunk + continuation, each 64 tokens
