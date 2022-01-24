@@ -21,7 +21,8 @@ class RETRODataset(Dataset):
         chunk_nn_memmap_path,
         seq_memmap_path,
         eos_id = EOS_ID,
-        pad_id = 0.
+        pad_id = 0.,
+        add_continuations = True
     ):
         super().__init__()
         self.num_chunks = num_chunks
@@ -32,6 +33,7 @@ class RETRODataset(Dataset):
 
         shape = (num_chunks, chunk_size + 1)
 
+        self.add_continuations = add_continuations
         self.get_chunks = partial(memmap, chunk_memmap_path, dtype = np.int32, shape = shape)
         self.get_knns = partial(memmap, chunk_nn_memmap_path, dtype = np.int32, shape = (num_chunks, num_neighbors))
         self.get_seqs = partial(memmap, seq_memmap_path, dtype = np.int32, shape = (num_sequences,))
@@ -74,15 +76,16 @@ class RETRODataset(Dataset):
             # use presence of [EOS] in chunk as way to detect document boundaries
             # [EOS] in BERT tokenizer is 102
 
-            knn_chunks = knn_chunks[..., :-1]
+            retrieved = knn_chunks[..., :-1]
 
-            continuation_indices = np.clip(knns + 1, 0, self.num_chunks - 1) # chunks are stored contiguously
-            continuation_chunks = chunks_memmap[continuation_indices][..., :-1]
-            continuation_chunks *= ~is_last_document_chunk
+            if self.add_continuations:
+                continuation_indices = np.clip(knns + 1, 0, self.num_chunks - 1) # chunks are stored contiguously
+                continuation_chunks = chunks_memmap[continuation_indices][..., :-1]
+                continuation_chunks *= ~is_last_document_chunk
 
-            # combine neighbors with continuations
+                # combine neighbors with continuations
 
-            retrieved = np.concatenate((knn_chunks, continuation_chunks), axis = -1)
+                retrieved = np.concatenate((retrieved, continuation_chunks), axis = -1)
 
             # mask out any nearest neighbor chunks that was -1 (not found at index time) to padding id
 
