@@ -89,7 +89,8 @@ class Attention(nn.Module):
         dim_head = 64,
         heads = 8,
         causal = False,
-        dropout = 0.
+        dropout = 0.,
+        null_kv = False
     ):
         super().__init__()
         self.heads = heads
@@ -104,8 +105,12 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
+        # allowing for attending to nothing (null function)
+        # and to save attention from breaking if all retrieved chunks are padded out
+        self.null_kv = nn.Parameter(torch.randn(2, inner_dim)) if null_kv else None
+
     def forward(self, x, mask = None, context = None, pos_emb = None):
-        device, h, scale = x.device, self.heads, self.scale
+        b, device, h, scale = x.shape[0], x.device, self.heads, self.scale
 
         x = self.norm(x)
         kv_input = default(context, x)
@@ -129,6 +134,14 @@ class Attention(nn.Module):
             q = apply_rotary_pos_emb(q, q_pos_emb)
             k = apply_rotary_pos_emb(k, k_pos_emb)
 
+        # add null key / values
+
+        if exists(self.null_kv):
+            nk, nv = self.null_kv.unbind(dim = 0)
+            nk, nv = map(lambda t: repeat(t, '(h d) -> b h 1 d', b = b, h = h), (nk, nv))
+            k = torch.cat((nk, k), dim = -2)
+            v = torch.cat((nv, v), dim = -2)
+
         # derive query key similarities
 
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
@@ -138,6 +151,9 @@ class Attention(nn.Module):
         mask_value = -torch.finfo(sim.dtype).max
 
         if exists(mask):
+            if exists(self.null_kv):
+                mask = F.pad(mask, (1, 0), value = True)
+
             mask = rearrange(mask, 'b j -> b 1 1 j')
             sim = sim.masked_fill(~mask, mask_value)
 
@@ -173,7 +189,7 @@ class ChunkedCrossAttention(nn.Module):
     ):
         super().__init__()
         self.chunk_size = chunk_size
-        self.cross_attn = Attention(**kwargs)
+        self.cross_attn = Attention(null_kv = True, **kwargs)
 
     def forward(self, x, *, context_mask = None, context, pos_emb = None):
         # derive variables
