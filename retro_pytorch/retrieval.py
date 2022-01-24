@@ -285,7 +285,8 @@ def index_embeddings(
         index_path = index_path,
         index_infos_path = str(index_folder / index_infos_file),
         max_index_memory_usage = max_index_memory_usage,
-        current_memory_available = current_memory_available
+        current_memory_available = current_memory_available,
+        should_be_memory_mappable = True
     )
 
     index = faiss.read_index(index_path, faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
