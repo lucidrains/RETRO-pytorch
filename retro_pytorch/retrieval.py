@@ -1,13 +1,16 @@
 from pathlib import Path
 from shutil import rmtree
+from math import ceil
 
 import torch
+import torch.nn.functional as F
+import logging
 import numpy as np
-
 from einops import rearrange
 
 import faiss
 from autofaiss import build_index
+
 from retro_pytorch.utils import memmap, reset_folder_
 
 # constants
@@ -20,15 +23,28 @@ BERT_VOCAB_SIZE = 30522
 TMP_PATH = Path('./.tmp')
 EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
+# helper functions
+
+def exists(val):
+    return val is not None
+
+def safe_cat(a, b, dim = 0):
+    if a is None:
+        return b
+    return torch.cat((a, b), dim = dim)
+
+def range_chunked(max_value, *, batch_size):
+    counter = 0
+    while counter < max_value:
+        curr = counter + batch_size
+        curr = min(curr, max_value)
+        yield slice(counter, curr)
+        counter = curr
+
 # singleton globals
 
 MODEL = None
 TOKENIZER = None
-
-# functions
-
-def exists(val):
-    return val is not None
 
 def get_tokenizer():
     global TOKENIZER
@@ -59,6 +75,88 @@ def tokenize(texts, add_special_tokens = True):
 
     token_ids = encoding.input_ids
     return token_ids
+
+# text to chunks
+
+def doc_text_to_chunks_and_seq_indices(
+    *,
+    doc_text,
+    chunk_size = 64,
+    seq_len = 2048,
+    pad_id = 0
+):
+    assert (seq_len % chunk_size) == 0, 'sequence length must be divisible by chunk size'
+
+    ids = tokenize(doc_text)
+    ids = rearrange(ids, '1 ... -> ...')
+
+    text_len = ids.shape[-1]
+
+    # pad to multiple of chunk size with an extra token
+
+    padding = chunk_size - ((text_len - 1) % chunk_size)
+    ids = F.pad(ids, (0, padding))
+
+    # split out very last token
+
+    ids, last_token = ids[:-1], ids[-1:]
+    ids = rearrange(ids, '(n c) -> n c', c = chunk_size)
+
+    # first tokens of chunk [2:] and on will become the last token of chunk [1:]
+
+    last_token_per_chunk = ids[1:, 0]
+    all_last_tokens = torch.cat((last_token_per_chunk, last_token), dim = 0)
+    all_last_tokens = rearrange(all_last_tokens, 'n -> n 1')
+
+    # append all last tokens to ids for (num_chunks, chunk_size + 1)
+
+    chunks_with_extra_token = torch.cat((ids, all_last_tokens), dim = -1)
+
+    # calculate random beginning chunk indices starting at 0, spaced seq len apart
+
+    total_chunks = ids.shape[0]
+    num_chunks_per_seq = seq_len // chunk_size
+    seq = torch.arange(0, total_chunks, num_chunks_per_seq)
+
+    return chunks_with_extra_token, seq
+
+def text_folder_to_chunks_and_seqs_(
+    *,
+    folder,
+    chunks_npy_path,
+    seqs_npy_path,
+    chunk_size = 64,
+    seq_len = 2048,
+    glob = '**/*.txt'
+):
+    paths = sorted([*Path(folder).glob(glob)])
+
+    num_chunks = 0
+    total_seq_len = 0
+
+    all_chunks = None
+    all_seq = None
+
+    for path in paths:
+        print(f'processing {path}')
+
+        chunks, seq = doc_text_to_chunks_and_seq_indices(
+            doc_text = path.read_text(),
+            chunk_size = chunk_size,
+            seq_len = seq_len
+        )
+
+        doc_chunk_len = chunks.shape[0]
+        doc_seq_len = seq.shape[0]
+
+        all_chunks = safe_cat(all_chunks, chunks)
+        all_seq = safe_cat(all_seq, seq + total_seq_len) # add offset to chunk start indices
+
+        num_chunks += doc_chunk_len
+        total_seq_len += doc_seq_len
+
+    np.save(chunks_npy_path, all_chunks.numpy())
+    np.save(seqs_npy_path, all_seq.numpy())
 
 # embedding function
 
@@ -94,13 +192,7 @@ def bert_embed(
     masked_mean =  numer / (denom + eps)
     return masked_mean
 
-def range_chunked(max_value, *, batch_size):
-    counter = 0
-    while counter < max_value:
-        curr = counter + batch_size
-        curr = min(curr, max_value)
-        yield slice(counter, curr)
-        counter = curr
+# chunks to knn
 
 def chunks_to_embeddings_(
     *,

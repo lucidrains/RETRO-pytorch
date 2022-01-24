@@ -167,6 +167,27 @@ ids = tokenize([
 embeds = bert_embed(ids, return_cls_repr = True) # (2, 768)
 ```
 
+Create your chunks and chunk start indices using `text_folder_to_chunks_and_seqs_`
+
+```python
+from retro_pytorch.retrieval import text_folder_to_chunks_and_seqs_
+
+text_folder_to_chunks_and_seqs_(
+    folder = './folder',
+    glob = '**/*.txt',
+    chunks_npy_path = './train.chunks.npy',
+    seqs_npy_path = './train.seq.npy',
+    chunk_size = 64,
+    seq_len = 2048,
+)
+
+# looks for all text files within ./folder
+# and saves the chunks to train.chunks.npy
+# and the sequence start indices to train.seq.npy
+
+# TODO (make efficient and convert to memmap)
+```
+
 ## Fetching Nearest Neighbors (wip)
 
 You can turn your memmapped chunks numpy array into embeddings and a faiss index with one command
