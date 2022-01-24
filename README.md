@@ -8,6 +8,8 @@ This library leverages <a href="https://github.com/criteo/autofaiss">autofaiss</
 
 If you are interested, please join <a href="https://discord.gg/3AvcJfbEBd">this Discord</a> for discussions
 
+<a href="http://jalammar.github.io/illustrated-retrieval-transformer/">Jay Alammar explanatory blogpost</a>
+
 ## Install
 
 ```bash
