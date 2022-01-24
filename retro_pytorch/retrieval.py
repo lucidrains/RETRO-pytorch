@@ -337,6 +337,7 @@ def chunks_to_precalculated_knn_(
     num_chunks,
     chunk_size,
     chunk_memmap_path,
+    doc_ids_memmap_path,
     use_cls_repr = False,
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
@@ -353,14 +354,30 @@ def chunks_to_precalculated_knn_(
     chunk_path = Path(chunk_memmap_path)
     knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
 
-    with memmap(knn_path, shape = (num_chunks, num_nearest_neighbors), dtype = np.int32, mode = 'w+') as knns:
+    with memmap(knn_path, shape = (num_chunks, num_nearest_neighbors), dtype = np.int32, mode = 'w+') as knns\
+        , memmap(doc_ids_memmap_path, shape = (num_chunks,), dtype = np.int32, mode = 'r') as doc_ids:
+
         for dim_slice in range_chunked(num_chunks, batch_size = max_rows_per_file):
             query_vector = embeddings[dim_slice]
 
-            _, indices = index.search(query_vector, k = num_nearest_neighbors + 1)
+            distances, indices = index.search(query_vector, k = num_nearest_neighbors + 1)
 
-            indices_without_self = indices[:, 1:]
-            knns[dim_slice] = indices_without_self
+            # remove self from distances and indices
+
+            distances = distances[:, 1:]
+            indices = indices[:, 1:]
+
+            # mask out any neighbors that belong to the same document to -1
+
+            query_doc_ids = doc_ids[dim_slice]
+            neighbor_doc_ids = doc_ids[indices]
+            neighbor_from_same_doc = query_doc_ids[..., None] == neighbor_doc_ids
+
+            indices = np.where(neighbor_from_same_doc, -1, indices)
+
+            # store nearest neighbors to knn memmap
+
+            knns[dim_slice] = indices
 
             print(f'knns calculated for {dim_slice.stop} / {num_chunks}')
 
