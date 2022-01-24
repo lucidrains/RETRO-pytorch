@@ -196,6 +196,9 @@ chunks_to_precalculated_knn_(
     chunk_memmap_path = './train.chunks.dat',
     num_nearest_neighbors = 2                  # number of nearest neighbors you'd like to use
 )
+
+# nearest neighbor info saved to ./train.chunks.knn.dat
+
 ```
 
 ## Todo
