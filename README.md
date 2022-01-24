@@ -185,6 +185,18 @@ neighbor_embeddings = embeddings[indices]       # (1, 2, 768)
 
 ```
 
+You can also directly calculate the nearest neighbor file necessary for training, with `chunks_to_precalculated_knn_` command
+
+```python
+from retro_pytorch.retrieval import chunks_to_precalculated_knn_
+
+chunks_to_precalculated_knn_(
+    num_chunks = 1000,
+    chunk_size = 64,
+    chunk_memmap_path = './train.chunks.dat',
+    num_nearest_neighbors = 2                  # number of nearest neighbors you'd like to use
+)
+```
 
 ## Todo
 

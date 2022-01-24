@@ -222,3 +222,38 @@ def chunks_to_index_and_embed(
 
     embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
     return index, embeddings
+
+def chunks_to_precalculated_knn_(
+    *,
+    num_nearest_neighbors,
+    num_chunks,
+    chunk_size,
+    chunk_memmap_path,
+    use_cls_repr = False,
+    max_rows_per_file = 500,
+    chunks_to_embeddings_batch_size = 16,
+    embed_dim = BERT_MODEL_DIM,
+    **index_kwargs
+):
+
+    index, embeddings = chunks_to_index_and_embed(
+        num_chunks = num_chunks,
+        chunk_size = chunk_size,
+        chunk_memmap_path = chunk_memmap_path
+    )
+
+    chunk_path = Path(chunk_memmap_path)
+    knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
+
+    with memmap(knn_path, shape = (num_chunks, num_nearest_neighbors), dtype = np.int32, mode = 'w+') as knns:
+        for dim_slice in range_chunked(num_chunks, batch_size = max_rows_per_file):
+            query_vector = embeddings[dim_slice]
+
+            _, indices = index.search(query_vector, k = num_nearest_neighbors + 1)
+
+            indices_without_self = indices[:, 1:]
+            knns[dim_slice] = indices_without_self
+
+            print(f'knns calculated for {dim_slice.stop} / {num_chunks}')
+
+    print(f'knn saved to {knn_path}')
