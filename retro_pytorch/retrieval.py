@@ -210,7 +210,6 @@ def chunks_to_embeddings_(
 
     with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
         , memmap(embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = 'w+') as embeddings:
-        chunks = chunks[:, :-1] # omit last token
 
         for dim_slice in range_chunked(num_chunks, batch_size = batch_size):
             batch_chunk_npy = chunks[dim_slice]
@@ -219,6 +218,8 @@ def chunks_to_embeddings_(
 
             cls_tokens = torch.full((batch_chunk.shape[0], 1), SOS_ID)
             batch_chunk = torch.cat((cls_tokens, batch_chunk), dim = 1)
+
+            batch_chunk = batch_chunk[:, :-1] # omit last token, the first token of the next chunk, used for autoregressive training
 
             batch_embed = bert_embed(
                 batch_chunk,
