@@ -342,7 +342,7 @@ def chunks_to_precalculated_knn_(
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
-    num_extra_neighbors = 2,
+    num_extra_neighbors = 10,
     **index_kwargs
 ):
 

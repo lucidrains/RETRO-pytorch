@@ -217,7 +217,7 @@ chunks_to_precalculated_knn_(
     chunk_size = 64,
     chunk_memmap_path = './train.chunks.dat',
     num_nearest_neighbors = 2,                  # number of nearest neighbors you'd like to use
-    num_extra_neighbors = 2                     # fetch 2 extra neighbors, in the case that fetched neighbors are frequently from same document (filtered out)
+    num_extra_neighbors = 10                    # fetch 10 extra neighbors, in the case that fetched neighbors are frequently from same document (filtered out)
 )
 
 # nearest neighbor info saved to ./train.chunks.knn.dat
