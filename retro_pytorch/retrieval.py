@@ -390,3 +390,4 @@ def chunks_to_precalculated_knn_(
             print(f'knns calculated for {dim_slice.stop} / {num_chunks}')
 
     print(f'knn saved to {knn_path}')
+    return knn_path

@@ -43,11 +43,78 @@ loss.backward()
 # do above for many steps
 ```
 
-## RETRO Datasets (wip)
+
+## RETRO Training Wrapper (wip)
+
+The aim of the `TrainingWrapper` is to process a folder of text documents into the necessary memmapped numpy arrays to begin training `RETRO`.
+
+```python
+import torch
+from retro_pytorch import RETRO, TrainingWrapper
+
+# instantiate RETRO, fit it into the TrainingWrapper with correct settings
+
+retro = RETRO(
+    max_seq_len = 2048,                      # max sequence length
+    enc_dim = 896,                           # encoder model dimension
+    enc_depth = 3,                           # encoder depth
+    dec_dim = 768,                           # decoder model dimensions
+    dec_depth = 1,                           # decoder depth
+    dec_cross_attn_layers = (1, 3, 6, 9),    # decoder cross attention layers (with causal chunk cross attention)
+    heads = 8,                               # attention heads
+    dim_head = 64,                           # dimension per head
+    dec_attn_dropout = 0.25,                 # decoder attention dropout
+    dec_ff_dropout = 0.25                    # decoder feedforward dropout
+).cuda()
+
+wrapper = TrainingWrapper(
+    retro = retro,                                 # path to retro instance
+    knn = 2,                                       # knn (2 in paper was sufficient)
+    chunk_size = 64,                               # chunk size (64 in paper)
+    documents_path = './text_folder',              # path to folder of text
+    glob = '**/*.txt',                             # text glob
+    chunks_memmap_path = './train.chunks.dat',     # path to chunks
+    seqs_memmap_path = './train.seq.dat',          # path to sequence data
+    doc_ids_memmap_path = './train.doc_ids.dat',   # path to document ids per chunk
+    max_chunks = 1_000_000,                        # maximum cap to chunks
+    max_seqs = 100_000,                            # maximum seqs
+    knn_extra_neighbors = 100                      # num extra  neighbors to fertch
+)
+
+# get the dataloader and optimizer (AdamW with all the correct settings)
+
+train_dl = iter(wrapper.get_dataloader(batch_size = 2, shuffle = True))
+optim = wrapper.get_optimizer(lr = 3e-4, wd = 0.01)
+
+# now do your training
+# ex. one gradient step
+
+seq, retrieved = map(lambda t: t.cuda(), next(train_dl))
+
+# seq       - (2, 2049)         - 1 extra token since split by seq[:, :-1], seq[:, 1:]
+# retrieved - (2, 32, 2, 128)   - 128 since chunk + continuation, each 64 tokens
+
+loss = retro(
+    seq,
+    retrieved,
+    return_loss = True
+)
+
+# one gradient step
+
+loss.backward()
+optim.step()
+optim.zero_grad()
+
+```
+
+## RETRO Datasets
 
 The `RETRODataset` class accepts paths to a number of memmapped numpy arrays containing the chunks, the index of the first chunk in the sequence to be trained on (in RETRO decoder), and the pre-calculated indices of the k-nearest neighbors per chunk.
 
-You can use this to easily assemble the data for `RETRO` training.
+You can use this to easily assemble the data for `RETRO` training, if you do not wish to use the `TrainingWrapper` from above.
+
+Furthermore, all the functions needed to create the necessary memmapped data is in the sections to follow.
 
 
 ```python
@@ -136,7 +203,7 @@ loss.backward()
 
 ```
 
-## Retrieval related tools (wip)
+## Retrieval related tools
 
 This repository will use the default tokenizer (sentencepiece) for the cased version of BERT. Embeddings will be fetched from the vanilla BERT, and can either be masked mean pooled representation, or the CLS token.
 
@@ -187,7 +254,7 @@ stats = text_folder_to_chunks_(
 # {'chunks': <number of chunks>, 'docs': <number of documents>, 'seqs': <number of sequences>}
 ```
 
-## Fetching Nearest Neighbors (wip)
+## Fetching Nearest Neighbors
 
 You can turn your memmapped chunks numpy array into embeddings and a faiss index with one command
 
@@ -216,6 +283,7 @@ chunks_to_precalculated_knn_(
     num_chunks = 1000,
     chunk_size = 64,
     chunk_memmap_path = './train.chunks.dat',
+    doc_ids_memmap_path = './train.doc_ids.dat',
     num_nearest_neighbors = 2,                  # number of nearest neighbors you'd like to use
     num_extra_neighbors = 10                    # fetch 10 extra neighbors, in the case that fetched neighbors are frequently from same document (filtered out)
 )

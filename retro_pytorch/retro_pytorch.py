@@ -371,8 +371,9 @@ class RETRO(nn.Module):
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
-
+        self.seq_len = max_seq_len
         self.pad_id = pad_id
+
         self.token_emb = nn.Embedding(num_tokens, enc_dim)
         self.pos_emb = nn.Embedding(max_seq_len, enc_dim)
 
