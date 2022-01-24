@@ -59,7 +59,7 @@ retro = RETRO(
     enc_dim = 896,                           # encoder model dimension
     enc_depth = 3,                           # encoder depth
     dec_dim = 768,                           # decoder model dimensions
-    dec_depth = 1,                           # decoder depth
+    dec_depth = 12,                          # decoder depth
     dec_cross_attn_layers = (1, 3, 6, 9),    # decoder cross attention layers (with causal chunk cross attention)
     heads = 8,                               # attention heads
     dim_head = 64,                           # dimension per head
@@ -75,10 +75,10 @@ wrapper = TrainingWrapper(
     glob = '**/*.txt',                             # text glob
     chunks_memmap_path = './train.chunks.dat',     # path to chunks
     seqs_memmap_path = './train.seq.dat',          # path to sequence data
-    doc_ids_memmap_path = './train.doc_ids.dat',   # path to document ids per chunk
+    doc_ids_memmap_path = './train.doc_ids.dat',   # path to document ids per chunk (used for filtering neighbors belonging to same document)
     max_chunks = 1_000_000,                        # maximum cap to chunks
     max_seqs = 100_000,                            # maximum seqs
-    knn_extra_neighbors = 100                      # num extra  neighbors to fertch
+    knn_extra_neighbors = 100                      # num extra neighbors to fertch
 )
 
 # get the dataloader and optimizer (AdamW with all the correct settings)
@@ -282,10 +282,10 @@ from retro_pytorch.retrieval import chunks_to_precalculated_knn_
 chunks_to_precalculated_knn_(
     num_chunks = 1000,
     chunk_size = 64,
-    chunk_memmap_path = './train.chunks.dat',
-    doc_ids_memmap_path = './train.doc_ids.dat',
-    num_nearest_neighbors = 2,                  # number of nearest neighbors you'd like to use
-    num_extra_neighbors = 10                    # fetch 10 extra neighbors, in the case that fetched neighbors are frequently from same document (filtered out)
+    chunk_memmap_path = './train.chunks.dat',    # path to main chunks dataset
+    doc_ids_memmap_path = './train.doc_ids.dat', # path to document ids created by text_folder_to_chunks_, used for filtering out neighbors that belong to the same document
+    num_nearest_neighbors = 2,                   # number of nearest neighbors you'd like to use
+    num_extra_neighbors = 10                     # fetch 10 extra neighbors, in the case that fetched neighbors are frequently from same document (filtered out)
 )
 
 # nearest neighbor info saved to ./train.chunks.knn.dat
