@@ -320,21 +320,23 @@ class Decoder(nn.Module):
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
 
-    def forward(self, x, *, context_mask = None, retrieved):
-        device, seq_len, num_chunks, num_neighbors, chunk_size = x.device, x.shape[-2], *retrieved.shape[-4:-1]
-        seq_chunk_size = seq_len // num_chunks
-
+    def forward(self, x, *, context_mask = None, retrieved = None):
+        device, seq_len = x.device, x.shape[-2]
         self_attn_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
-        cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size, device = device, offset = self.chunk_size - 1)  # need to add extra chunk size, since it will be shifted
-        cross_attn_k_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
+        if exists(retrieved):
+            num_chunks, num_neighbors, chunk_size = retrieved.shape[-4:-1]
+            seq_chunk_size = seq_len // num_chunks
 
-        cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
+            cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size, device = device, offset = self.chunk_size - 1)  # need to add extra chunk size, since it will be shifted
+            cross_attn_k_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
+
+            cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
 
         for attn, cross_attn, ff in self.layers:
             x = attn(x, pos_emb = self_attn_pos_emb) + x
 
-            if exists(cross_attn):
+            if exists(cross_attn) and exists(retrieved):
                 x = cross_attn(
                     x,
                     context = retrieved,
@@ -401,10 +403,32 @@ class RETRO(nn.Module):
 
         self.to_logits = nn.Linear(dec_dim, num_tokens)
 
+    def forward_without_retrieval(
+        self,
+        seq
+    ):
+        # embed sequence
+
+        embed = self.token_emb(seq)
+        embed = embed[:, :self.seq_len]
+
+        # get absolute positional embedding
+
+        pos_emb = self.pos_emb(torch.arange(embed.shape[1], device = embed.device))
+        pos_emb = rearrange(pos_emb, 'n d -> 1 n d')
+        embed = embed + pos_emb
+
+        embed = self.to_decoder_model_dim(embed)
+        embed = self.decoder(embed)
+
+        # project to logits
+
+        return self.to_logits(embed)
+
     def forward(
         self,
         seq,
-        retrieved,
+        retrieved = None,
         return_loss = False
     ):
         """
@@ -414,6 +438,9 @@ class RETRO(nn.Module):
         d - feature dimension
         r - num retrieved neighbors
         """
+
+        if not exists(retrieved):
+            return self.forward_without_retrieval(seq)
 
         assert not (return_loss and not self.training), 'must be training if returning loss'
 
