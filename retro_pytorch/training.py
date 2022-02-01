@@ -1,4 +1,6 @@
 import numpy as np
+from functools import partial
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -42,13 +44,73 @@ def gumbel_noise(t):
 def gumbel_sample(t, temperature = 1., dim = -1):
     return ((t / temperature) + gumbel_noise(t)).argmax(dim = dim)
 
-def top_k(logits, thres = 0.5):
+def top_k(logits, thres = 0.9):
     num_logits = logits.shape[-1]
     k = max(int((1 - thres) * num_logits), 1)
     val, ind = torch.topk(logits, k)
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(1, ind, val)
     return probs
+
+def top_p(logits, thres = 0.9):
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+    cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+    sorted_indices_to_remove = cum_probs > (1 - thres)
+    sorted_indices_to_remove[:, 1:] = sorted_indices_to_remove[:, :-1].clone()
+    sorted_indices_to_remove[:, 0] = 0
+
+    sorted_logits[sorted_indices_to_remove] = float('-inf')
+    return sorted_logits.scatter(1, sorted_indices, sorted_logits)
+
+# function that returns knn chunks from seq chunks
+#
+# 1. adds sos and eos to seq chunks
+# 2. embeds the seq chunks with special tokens with frozen BERT
+# 3. fetches the knn indices with faiss
+# 4. gets the knn chunks as well as the continuation from a reference to the chunks data (memmap)
+#
+
+def knn_chunks_from_seq_chunks(
+    seq_chunks,
+    *,
+    knn,
+    faiss_index,
+    num_chunks,
+    chunk_size,
+    chunks_memmap_path,
+):
+    b, device = seq_chunks.shape[0], seq_chunks.device
+
+    # prepare last chunk with sos and eos tokens for BERT embed
+
+    ones = torch.ones((b, 1), dtype = torch.bool, device = device)
+    sos = ones * SOS_ID
+    eos = ones * EOS_ID
+
+    seq_chunks = torch.cat((sos, seq_chunks, eos), dim = 1)
+
+    # embed with frozen BERT
+
+    embeds = bert_embed(seq_chunks.cpu()) # fetch embeds on CPU for now
+
+    # retrieval of knn with faiss
+
+    _, knn_indices = faiss_index.search(embeds.numpy(), k = knn)
+
+    # numpy to torch
+
+    with memmap(chunks_memmap_path, dtype = np.int32, shape = (num_chunks + 1, chunk_size + 1)) as chunk_memmap:
+        knn_chunks = knn_to_retrieved_chunks(
+            knn_indices,
+            chunk_memmap,
+            add_continuations = True,
+            num_chunks = num_chunks
+        )
+
+        knn_chunks_torch = torch.from_numpy(knn_chunks).to(device)
+
+    return knn_chunks_torch
 
 # training wrapper class
 
@@ -111,42 +173,60 @@ class TrainingWrapper(nn.Module):
 
         # params needed for generation
 
-        self.knn = knn
-        self.faiss_index = faiss_index
-        self.max_seq_len = self.retro.seq_len
-        self.num_chunks = num_chunks
         self.chunk_size = chunk_size
-        self.chunks_memmap_path = chunks_memmap_path
+        self.max_seq_len = self.retro.seq_len
+
+        self.fetch_knn_chunks_fn = partial(
+            knn_chunks_from_seq_chunks,
+            knn = knn,
+            chunk_size = chunk_size,
+            num_chunks = num_chunks,
+            chunks_memmap_path = chunks_memmap_path,
+            faiss_index = faiss_index
+        )
 
     @torch.no_grad()
     @eval_decorator
     def generate(
         self,
         start = None,
+        filter_fn = top_k,
         filter_thres = 0.9,
-        temperature = 1.0
+        temperature = 1.0,
     ):
+        assert filter_fn in {top_k, top_p}, 'filter function must be either top-k or nucleus'
+
         device = next(self.retro.parameters()).device
 
+        # if not prime tokens given, assume sampling from SOS token with batch size of 1
+
         if not exists(start):
-            start = torch.ones((1, 1), dtype = torch.bool, device = device) * SOS_ID
+            start = torch.full((1, 1), SOS_ID, device = device).long()
 
         b, start_seq_len = start.shape
-        out = start
 
         # prepare retrieval related variables
 
-        retrieved = None
+        if start_seq_len >= self.chunk_size:
+            start = start.to(device)
+            seq_index = (start_seq_len // self.chunk_size) * self.chunk_size
+            past_seq_chunks = rearrange(start[:, :seq_index], 'b (n c) -> (b n) c', c = self.chunk_size)
 
-        ones = torch.ones((b, 1), dtype = torch.bool, device = device)
-        sos = ones * SOS_ID
-        eos = ones * EOS_ID
+            retrieved = self.fetch_knn_chunks_fn(past_seq_chunks)
+            retrieved = rearrange(retrieved, '(b n) k c -> b n k c', b = b)
+
+        # get starting sequence index
+
+        out = start
+
+        # sampling loop
 
         for i in range(start_seq_len - 1, self.max_seq_len):
+
             logits = self.retro(out, retrieved = retrieved)
             logits = logits[:, i]
 
-            logits = top_k(logits, thres = filter_thres)
+            logits = filter_fn(logits, thres = filter_thres)
             sampled = gumbel_sample(logits, temperature = temperature, dim = -1)
             sampled = rearrange(sampled, 'b -> b 1')
 
@@ -173,35 +253,13 @@ class TrainingWrapper(nn.Module):
             if (curr_seq_len % self.chunk_size) == 0:
                 last_chunk = rearrange(out, 'b (c n) -> b c n', n = self.chunk_size)[:, -1]
 
-                # prepare last chunk with sos and eos tokens for BERT embed
+                knn_chunks = self.fetch_knn_chunks_fn(last_chunk)
 
-                last_chunk = torch.cat((sos, last_chunk, eos), dim = 1)
+                # concat retrieved knn chunks to all retrieved
+                # to be sent to Retro for chunked cross attention at the next iteration
 
-                # embed with frozen BERT
-
-                embeds = bert_embed(last_chunk.cpu()) # fetch embeds on CPU for now
-
-                # retrieval of knn with faiss
-
-                _, knn_indices = self.faiss_index.search(embeds.numpy(), k = self.knn)
-
-                # numpy to torch
-
-                with memmap(self.chunks_memmap_path, dtype = np.int32, shape = (self.num_chunks + 1, self.chunk_size + 1)) as chunk_memmap:
-                    knn_chunks = knn_to_retrieved_chunks(
-                        knn_indices,
-                        chunk_memmap,
-                        add_continuations = True,
-                        num_chunks = self.num_chunks
-                    )
-
-                    knn_chunks_torch = torch.from_numpy(knn_chunks).to(device)
-                    knn_chunks_torch = rearrange(knn_chunks_torch, 'b k r -> b 1 k r')
-
-                    # concat retrieved knn chunks to all retrieved
-                    # to be sent to Retro for chunked cross attention at the next iteration
-
-                    retrieved = safe_cat(retrieved, knn_chunks_torch, dim = 1)
+                knn_chunks = rearrange(knn_chunks, 'b k r -> b 1 k r')
+                retrieved = safe_cat(retrieved, knn_chunks, dim = 1)
 
                 print(f'retrieved at {curr_seq_len} / {self.max_seq_len}')
 

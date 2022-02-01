@@ -114,6 +114,11 @@ optim.zero_grad()
 
 sampled = wrapper.generate(filter_thres = 0.9, temperature = 1.0) # (1, <2049) terminates early if all <eos>
 
+# or you can generate with a prompt, knn retrieval for initial chunks all taken care of
+
+prompt = torch.randint(0, 1000, (1, 128))  # start with two chunks worth of sequence
+sampled = wrapper.generate(prompt, filter_thres = 0.9, temperature = 1.0) # (1, <2049) terminates early if all <eos>
+
 ```
 
 ## RETRO Datasets
@@ -299,19 +304,6 @@ chunks_to_precalculated_knn_(
 # nearest neighbor info saved to ./train.chunks.knn.dat
 
 ```
-
-## Todo
-
-- [x] handle partially filled chunks with mask
-- [x] handle indexing of corpus of text with faiss
-- [x] function for getting frozen BERT embeddings for batch of chunks
-- [x] autohandle retrieved chunks for last chunk in sequence, whether it is given or not
-- [x] handle reindexing of all nearest neighbors
-- [x] single text file to chunk.npy and seq_begin_indices.npy, handling <sos>, <eos> as well as extra token for autoregressive training
-- [x] chunks_to_precalculated_knn_ needs to filter out documents other than self through some tensor magic
-- [x] function to calculate document id assuming <eos> is present
-- [x] inference code, autoretrieving at chunk boundaries
-- [ ] when sampling with a prompt that is greater than the chunk size, one needs to fetch all the knns for all chunks past before starting the sampling loop
 
 ## Citations
 
