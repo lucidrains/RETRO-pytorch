@@ -17,7 +17,7 @@ from retro_pytorch.utils import memmap, reset_folder_
 SOS_ID = 101
 EOS_ID = 102
 BERT_MODEL_DIM = 768
-BERT_VOCAB_SIZE = 30522
+BERT_VOCAB_SIZE = 28996
 
 TMP_PATH = Path('./.tmp')
 EMBEDDING_TMP_SUBFOLDER = 'embeddings'
@@ -386,4 +386,4 @@ def chunks_to_precalculated_knn_(
             print(f'knns calculated for {dim_slice.stop} / {num_chunks}')
 
     print(f'knn saved to {knn_path}')
-    return knn_path
+    return knn_path, index

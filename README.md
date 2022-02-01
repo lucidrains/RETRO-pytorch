@@ -108,6 +108,12 @@ loss.backward()
 optim.step()
 optim.zero_grad()
 
+# do above for many steps, then ...
+
+# topk sampling with retrieval at chunk boundaries
+
+sampled = wrapper.generate(filter_thres = 0.9, temperature = 1.0) # (1, <2049) terminates early if all <eos>
+
 ```
 
 ## RETRO Datasets
@@ -304,7 +310,8 @@ chunks_to_precalculated_knn_(
 - [x] single text file to chunk.npy and seq_begin_indices.npy, handling <sos>, <eos> as well as extra token for autoregressive training
 - [x] chunks_to_precalculated_knn_ needs to filter out documents other than self through some tensor magic
 - [x] function to calculate document id assuming <eos> is present
-- [ ] inference code, autoretrieving at chunk boundaries
+- [x] inference code, autoretrieving at chunk boundaries
+- [ ] when sampling with a prompt that is greater than the chunk size, one needs to fetch all the knns for all chunks past before starting the sampling loop
 
 ## Citations
 

@@ -208,11 +208,19 @@ class ChunkedCrossAttention(nn.Module):
 
         x = F.pad(x, (0, 0, -causal_padding, causal_padding), value = 0.)
 
+        # remove sequence which is ahead of the neighbors retrieved (during inference)
+
+        seq_index = (n // chunk_size) * chunk_size
+        x, x_remainder = x[:, :seq_index], x[:, seq_index:]
+
+        seq_remain_len = x_remainder.shape[-2]
+
         # take care of rotary positional embedding
         # make sure queries positions are properly shifted to the future
 
         q_pos_emb, k_pos_emb = pos_emb
         q_pos_emb = F.pad(q_pos_emb, (0, 0, -causal_padding, causal_padding), value = 0.)
+
         k_pos_emb = repeat(k_pos_emb, 'b h n d -> b h (r n) d', r = num_retrieved)
         pos_emb = (q_pos_emb, k_pos_emb)
 
@@ -234,7 +242,7 @@ class ChunkedCrossAttention(nn.Module):
 
         # pad back to original, with 0s at the beginning (which will be added to the residual and be fine)
 
-        out = F.pad(out, (0, 0, causal_padding, -causal_padding), value = 0.)
+        out = F.pad(out, (0, 0, causal_padding, -causal_padding + seq_remain_len), value = 0.)
         return out
 
 # encoder and decoder classes
@@ -326,9 +334,8 @@ class Decoder(nn.Module):
 
         if exists(retrieved):
             num_chunks, num_neighbors, chunk_size = retrieved.shape[-4:-1]
-            seq_chunk_size = seq_len // num_chunks
 
-            cross_attn_q_pos_emb = self.rotary_pos_emb(seq_chunk_size, device = device, offset = self.chunk_size - 1)  # need to add extra chunk size, since it will be shifted
+            cross_attn_q_pos_emb = self.rotary_pos_emb(self.chunk_size, device = device, offset = self.chunk_size - 1)  # need to add extra chunk size, since it will be shifted
             cross_attn_k_pos_emb = self.rotary_pos_emb(chunk_size, device = device)
 
             cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
@@ -463,7 +470,13 @@ class RETRO(nn.Module):
         n, num_chunks, num_neighbors, chunk_size, retrieved_shape, device = seq.shape[-1], *retrieved.shape[-3:], retrieved.shape, seq.device
 
         assert chunk_size >= self.chunk_size, 'chunk size of retrieval input must be greater or equal to the designated chunk_size on RETRO initialization'
-        assert divisible_by(n, self.chunk_size), 'sequence length must be divisible by chunk size'
+
+        num_seq_chunks = n // self.chunk_size
+        assert num_chunks == num_seq_chunks, f'sequence requires {num_seq_chunks} retrieved chunks, but only {num_chunks} passed in'
+
+        # sequence index at which k-nearest neighbors have not been fetched yet after
+
+        seq_index = num_seq_chunks * self.chunk_size
 
         # embed both sequence and retrieved chunks
 
@@ -488,7 +501,7 @@ class RETRO(nn.Module):
         # encode
 
         retrieved = rearrange(retrieved, 'b k r n d -> (b k r) n d')
-        embed_as_context = repeat(embed, 'b (k n) d -> (b k r) n d', n = self.chunk_size, r = num_neighbors)
+        embed_as_context = repeat(embed[:, :seq_index], 'b (k n) d -> (b k r) n d', n = self.chunk_size, r = num_neighbors)
 
         retrieved = self.encoder(retrieved, mask = encoder_retrieved_mask, chunked_seq = embed_as_context)
         retrieved = rearrange(retrieved, '(b k r) n d -> b k r n d', k = num_chunks, r = num_neighbors)
