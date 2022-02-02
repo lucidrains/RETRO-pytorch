@@ -44,7 +44,7 @@ loss.backward()
 ```
 
 
-## RETRO Training Wrapper (wip)
+## RETRO Training Wrapper
 
 The aim of the `TrainingWrapper` is to process a folder of text documents into the necessary memmapped numpy arrays to begin training `RETRO`.
 
