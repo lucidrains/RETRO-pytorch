@@ -205,10 +205,13 @@ class TrainingWrapper(nn.Module):
 
         b, start_seq_len = start.shape
 
+        # move onto same device as RETRO
+
+        start = start.to(device)
+
         # prepare retrieval related variables
 
         if start_seq_len >= self.chunk_size:
-            start = start.to(device)
             seq_index = (start_seq_len // self.chunk_size) * self.chunk_size
             past_seq_chunks = rearrange(start[:, :seq_index], 'b (n c) -> (b n) c', c = self.chunk_size)
 
