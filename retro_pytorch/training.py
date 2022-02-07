@@ -3,6 +3,7 @@ from functools import partial
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from retro_pytorch import RETRO, RETRODataset
@@ -128,6 +129,7 @@ class TrainingWrapper(nn.Module):
         doc_ids_memmap_path = './train.doc_ids.dat',
         max_chunks = 1_000_000,
         max_seqs = 100_000,
+        max_docs = 10_000,
         knn_extra_neighbors = 100,
         **index_kwargs
     ):
@@ -144,7 +146,8 @@ class TrainingWrapper(nn.Module):
             chunk_size = chunk_size,
             seq_len = retro.seq_len,
             max_chunks = max_chunks,
-            max_seqs = max_seqs
+            max_seqs = max_seqs,
+            max_docs = max_docs
         )
 
         num_chunks = self.stats['chunks']
@@ -190,6 +193,7 @@ class TrainingWrapper(nn.Module):
     def generate(
         self,
         start = None,
+        retrieved = None,
         filter_fn = top_k,
         filter_thres = 0.9,
         temperature = 1.0,
