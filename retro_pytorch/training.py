@@ -190,6 +190,7 @@ class TrainingWrapper(nn.Module):
     def generate(
         self,
         start = None,
+        retrieved = None,
         filter_fn = top_k,
         filter_thres = 0.9,
         temperature = 1.0,
