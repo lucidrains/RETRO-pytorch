@@ -131,7 +131,6 @@ class TrainingWrapper(nn.Module):
         doc_ids_memmap_path = './train.doc_ids.dat',
         max_chunks = 1_000_000,
         max_seqs = 100_000,
-        max_docs = 10_000,
         knn_extra_neighbors = 100,
         processed_stats_json_path = './processed-stats.json',
         faiss_index_filename = 'knn.index',
@@ -161,8 +160,7 @@ class TrainingWrapper(nn.Module):
                 chunk_size = chunk_size,
                 seq_len = retro.seq_len,
                 max_chunks = max_chunks,
-                max_seqs = max_seqs,
-                max_docs = max_docs
+                max_seqs = max_seqs
             )
         else:
             print(f'found to be previously processed at {str(stats_path)}')
