@@ -130,8 +130,7 @@ def text_folder_to_chunks_(
     seq_len = 2048,
     glob = '**/*.txt',
     max_chunks = 1_000_000,
-    max_seqs = 100_000,
-    max_docs = 10_000
+    max_seqs = 100_000
 ):
     paths = sorted([*Path(folder).glob(glob)])
 
@@ -141,7 +140,7 @@ def text_folder_to_chunks_(
 
     chunks_shape = (max_chunks, chunk_size + 1)
     seqs_shape = (max_seqs,)
-    doc_ids_shape = (max_docs,)
+    doc_ids_shape = (max_chunks,)
 
     with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32, mode = 'w+') as chunks_memmap\
         , memmap(seqs_memmap_path, shape = seqs_shape, dtype = np.int32, mode = 'w+') as seqs_memmap\
