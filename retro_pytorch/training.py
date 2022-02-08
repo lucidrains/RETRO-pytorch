@@ -141,6 +141,8 @@ class TrainingWrapper(nn.Module):
         assert isinstance(retro, RETRO), 'retro must be instance of RETRO'
         self.retro = retro
 
+        force_reprocess = is_true_env_flag('REPROCESS')
+
         # store the processed training data statistics
         # number of chunks, number of sequences
 
@@ -149,7 +151,7 @@ class TrainingWrapper(nn.Module):
         # if the statistics file does not exist, process folders of text
         # force reprocess by setting REPROCESS=1 when running training script
 
-        if not stats_path.exists() or is_true_env_flag('REPROCESS'):
+        if not stats_path.exists() or force_reprocess:
             self.stats = text_folder_to_chunks_(
                 folder = documents_path,
                 glob = glob,
@@ -182,6 +184,7 @@ class TrainingWrapper(nn.Module):
             num_nearest_neighbors = knn,
             num_extra_neighbors = knn_extra_neighbors,
             index_file = faiss_index_filename,
+            force_reprocess = force_reprocess,
             **index_kwargs
         )
 

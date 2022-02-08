@@ -20,6 +20,7 @@ BERT_MODEL_DIM = 768
 BERT_VOCAB_SIZE = 28996
 
 TMP_PATH = Path('./.tmp')
+INDEX_FOLDER_PATH = TMP_PATH / '.index'
 EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
 # helper functions
@@ -34,6 +35,11 @@ def range_chunked(max_value, *, batch_size):
         curr = min(curr, max_value)
         yield slice(counter, curr)
         counter = curr
+
+# indexing helper functions
+
+def faiss_read_index(path):
+    return faiss.read_index(str(path), faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
 
 # singleton globals
 
@@ -268,22 +274,21 @@ def index_embeddings(
     max_index_memory_usage = '100m',
     current_memory_available = '1G'
 ):
-    index_folder = TMP_PATH / '.index'
     embeddings_path = TMP_PATH / embeddings_folder
-    reset_folder_(index_folder)
+    index_path = INDEX_FOLDER_PATH / index_file
 
-    index_path = str(index_folder / index_file)
+    reset_folder_(INDEX_FOLDER_PATH)
 
     build_index(
         embeddings = str(embeddings_path),
         index_path = index_path,
-        index_infos_path = str(index_folder / index_infos_file),
+        index_infos_path = str(INDEX_FOLDER_PATH / index_infos_file),
         max_index_memory_usage = max_index_memory_usage,
         current_memory_available = current_memory_available,
         should_be_memory_mappable = True
     )
 
-    index = faiss.read_index(index_path, faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
+    index = faiss_read_index(index_path)
     return index
 
 def chunks_to_index_and_embed(
@@ -295,6 +300,7 @@ def chunks_to_index_and_embed(
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
+    index_file = 'knn.index',
     **index_kwargs
 ):
     embedding_path = f'{chunk_memmap_path}.embedded'
@@ -320,6 +326,7 @@ def chunks_to_index_and_embed(
 
     index = index_embeddings(
         embeddings_folder = EMBEDDING_TMP_SUBFOLDER,
+        index_file = index_file,
         **index_kwargs
     )
 
@@ -338,18 +345,31 @@ def chunks_to_precalculated_knn_(
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
     num_extra_neighbors = 10,
+    force_reprocess = False,
+    index_file = 'knn.index',
     **index_kwargs
 ):
+    chunk_path = Path(chunk_memmap_path)
+    knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
+    index_path = INDEX_FOLDER_PATH / index_file
+
+    # early return knn path and faiss index
+    # unless if force_reprocess is True
+
+    if index_path.exists() and knn_path.exists() and not force_reprocess:
+        print(f'preprocessed knn found at {str(knn_path)}, faiss index reconstituted from {str(index_path)}')
+        index = faiss_read_index(index_path)
+        return knn_path, index
+
+    # fetch the faiss index and calculated embeddings for the chunks
 
     index, embeddings = chunks_to_index_and_embed(
         num_chunks = num_chunks,
         chunk_size = chunk_size,
         chunk_memmap_path = chunk_memmap_path,
+        index_file = index_file,
         **index_kwargs
     )
-
-    chunk_path = Path(chunk_memmap_path)
-    knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
 
     total_neighbors_to_fetch = num_extra_neighbors + num_nearest_neighbors + 1
 

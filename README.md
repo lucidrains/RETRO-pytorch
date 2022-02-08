@@ -121,6 +121,12 @@ sampled = wrapper.generate(prompt, filter_thres = 0.9, temperature = 1.0) # (1, 
 
 ```
 
+If you wish to force a reprocess of the training data, simply run your script with a `REPROCESS=1` environment flag as so
+
+```bash
+$ REPROCESS=1 python train.py
+```
+
 ## RETRO Datasets
 
 The `RETRODataset` class accepts paths to a number of memmapped numpy arrays containing the chunks, the index of the first chunk in the sequence to be trained on (in RETRO decoder), and the pre-calculated indices of the k-nearest neighbors per chunk.
