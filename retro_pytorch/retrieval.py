@@ -280,7 +280,7 @@ def index_embeddings(
 
     build_index(
         embeddings = str(embeddings_path),
-        index_path = index_path,
+        index_path = str(index_path),
         index_infos_path = str(INDEX_FOLDER_PATH / index_infos_file),
         max_index_memory_usage = max_index_memory_usage,
         current_memory_available = current_memory_available,
