@@ -8,6 +8,8 @@ This library leverages <a href="https://github.com/criteo/autofaiss">autofaiss</
 
 <a href="http://jalammar.github.io/illustrated-retrieval-transformer/">Jay Alammar explanatory blogpost</a>
 
+The selling point of this retriever approach is reaching GPT-3 performance at 10x less parameters. More research is <a href="https://arxiv.org/abs/2009.06857">definitely deserved</a> in this area.
+
 ## Install
 
 ```bash
