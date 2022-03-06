@@ -453,7 +453,7 @@ class RETRO(nn.Module):
 
         # assume padding token id (usually 0.) is to be masked out
 
-        mask = retrieved == self.pad_id
+        mask = retrieved != self.pad_id
 
         # handle some user inputs
 
