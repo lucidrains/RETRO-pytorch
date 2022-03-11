@@ -270,6 +270,7 @@ def index_embeddings(
     else:
         num_clusters = 1048576
     num_train_examples = min(num_clusters * 64, embeddings.shape[0])
+    print(f'Training an IVF index with {num_clusters} clusters on {num_train_examples} training examples (out of {embeddings.shape[0]} total vectors).')
 
     # This is the closest FAISS equivalent to Google's SCANN
     # See https://github.com/facebookresearch/faiss/wiki/The-index-factory for what this string means.
@@ -277,14 +278,31 @@ def index_embeddings(
     # Also note that this index requires *at least* ~16x4 bits of RAM for every stored vector.
     index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ4_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
 
-    train_indices = np.random.choice(embeddings.shape[0], size=num_train_examples, replace=False)
-    index.train(embeddings[train_indices, :])
-    index.add(embeddings)
+    # From https://gist.github.com/mdouze/46d6bbbaabca0b9778fca37ed2bcccf6
+    print(f'Using {faiss.get_num_gpus()} gpus for index training')
+    index_ivf = faiss.extract_index_ivf(index)
+    clustering_index = faiss.index_cpu_to_all_gpus(faiss.IndexFlatL2(index_ivf.d))
+    index_ivf.clustering_index = clustering_index
 
     # Look at all the embeddings in the top 5 closest voronoi cells when doing the IVF lookup
     # TODO (mitchg) - tinker with this later
     index.nprobe = 5
 
+    if num_train_examples < embeddings.shape[0]:
+        print(f'Selecting random subset to train with...')
+        train_indices = np.random.choice(embeddings.shape[0], size=num_train_examples, replace=False)
+        # Note: sorting 400M indices is actually pretty fast (under 20s)
+        train_indices = np.sort(train_indices)
+        train_embeds = embeddings[train_indices, :]
+    else:
+        train_embeds = embeddings
+
+    print(f'Training...')
+    index.train(train_embeds)
+    print(f'Adding embeds to index...')
+    index.add(embeddings)
+
+    print(f'Writing index to {index_path}...')
     faiss.write_index(index, str(index_path))
     return index
 
