@@ -17,6 +17,7 @@ setup(
     'retrieval',
   ],
   install_requires=[
+    'transformers',
     'autofaiss',
     'einops>=0.3',
     'numpy',
