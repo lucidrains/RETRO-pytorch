@@ -1,5 +1,6 @@
 from pathlib import Path
 from math import ceil
+from math import sqrt
 
 import torch
 import torch.nn.functional as F
@@ -8,7 +9,6 @@ import numpy as np
 from einops import rearrange
 
 import faiss
-from autofaiss import build_index
 
 from retro_pytorch.utils import memmap, reset_folder_
 
@@ -250,51 +250,42 @@ def chunks_to_embeddings_(
             print(f'embedded {dim_slice.stop} / {num_chunks}')
 
 
-def memmap_file_to_chunks_(
-    memmap_path,
-    *,
-    folder,
-    shape,
-    dtype,
-    max_rows_per_file = 500
-):
-    rows, _ = shape
-
-    with memmap(memmap_path, shape = shape, dtype = dtype, mode = 'r') as f:
-        root_path = TMP_PATH / folder
-        reset_folder_(root_path)
-
-        for ind, dim_slice in enumerate(range_chunked(rows, batch_size = max_rows_per_file)):
-            filename = root_path / f'{ind}.npy'
-            data_slice = f[dim_slice]
-
-            np.save(str(filename), f[dim_slice])
-            print(f'saved {str(filename)}')
-
 def index_embeddings(
-    embeddings_folder,
+    embeddings_path,
+    embed_shape,
     *,
     index_file = 'knn.index',
-    index_infos_file = 'index_infos.json',
-    max_index_memory_usage = '100m',
-    current_memory_available = '1G'
 ):
-    embeddings_path = TMP_PATH / embeddings_folder
     index_path = INDEX_FOLDER_PATH / index_file
-
     reset_folder_(INDEX_FOLDER_PATH)
+    embeddings = np.memmap(embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
 
-    build_index(
-        embeddings = str(embeddings_path),
-        index_path = str(index_path),
-        index_infos_path = str(INDEX_FOLDER_PATH / index_infos_file),
-        max_index_memory_usage = max_index_memory_usage,
-        current_memory_available = current_memory_available,
-        should_be_memory_mappable = True,
-        use_gpu = torch.cuda.is_available(),
-    )
+    # Per https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
+    if embeddings.shape[0] < 1_000_000:
+        num_clusters = int(sqrt(embeddings.shape[0]) * 8)
+    elif embeddings.shape[0] > 1_000_000 and embeddings.shape[0] < 10_000_000:
+        num_clusters = 65536
+    elif embeddings.shape[0] > 10_000_000 and embeddings.shape[0] < 100_000_000:
+        num_clusters = 262144
+    else:
+        num_clusters = 1048576
+    num_train_examples = min(num_clusters * 64, embeddings.shape[0])
 
-    index = faiss_read_index(index_path)
+    # This is the closest FAISS equivalent to Google's SCANN
+    # See https://github.com/facebookresearch/faiss/wiki/The-index-factory for what this string means.
+    # Note that the IndexIVFPQFastScan index created by this factory is intended for use on AVX2 enabled CPUs.
+    # Also note that this index requires *at least* ~16x4 bits of RAM for every stored vector.
+    index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ4_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
+
+    train_indices = np.random.choice(embeddings.shape[0], size=num_train_examples, replace=False)
+    index.train(embeddings[train_indices, :])
+    index.add(embeddings)
+
+    # Look at all the embeddings in the top 5 closest voronoi cells when doing the IVF lookup
+    # TODO (mitchg) - tinker with this later
+    index.nprobe = 5
+
+    faiss.write_index(index, str(index_path))
     return index
 
 def chunks_to_index_and_embed(
@@ -307,7 +298,6 @@ def chunks_to_index_and_embed(
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
     index_file = 'knn.index',
-    **index_kwargs
 ):
     embedding_path = f'{chunk_memmap_path}.embedded'
     embed_shape = (num_chunks, embed_dim)
@@ -322,18 +312,10 @@ def chunks_to_index_and_embed(
         embed_dim = embed_dim
     )
 
-    memmap_file_to_chunks_(
-        embedding_path,
-        shape = embed_shape,
-        dtype = np.float32,
-        folder = EMBEDDING_TMP_SUBFOLDER,
-        max_rows_per_file = max_rows_per_file
-    )
-
     index = index_embeddings(
-        embeddings_folder = EMBEDDING_TMP_SUBFOLDER,
+        embeddings_path=embedding_path,
+        embed_shape = embed_shape,
         index_file = index_file,
-        **index_kwargs
     )
 
     embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
@@ -353,7 +335,6 @@ def chunks_to_precalculated_knn_(
     num_extra_neighbors = 10,
     force_reprocess = False,
     index_file = 'knn.index',
-    **index_kwargs
 ):
     chunk_path = Path(chunk_memmap_path)
     knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
@@ -374,7 +355,6 @@ def chunks_to_precalculated_knn_(
         chunk_size = chunk_size,
         chunk_memmap_path = chunk_memmap_path,
         index_file = index_file,
-        **index_kwargs
     )
 
     total_neighbors_to_fetch = num_extra_neighbors + num_nearest_neighbors + 1
