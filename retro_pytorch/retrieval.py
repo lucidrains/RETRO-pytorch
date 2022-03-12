@@ -189,6 +189,7 @@ def bert_embed(
 
     if torch.cuda.is_available():
         token_ids = token_ids.cuda()
+        mask = mask.cuda()
 
     outputs = model(
         input_ids = token_ids,
