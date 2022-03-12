@@ -325,6 +325,7 @@ def chunks_to_index_and_embed(
     *,
     num_chunks,
     chunk_size,
+    embedding_path,
     chunk_memmap_path,
     use_cls_repr = False,
     max_rows_per_file = 500,
@@ -332,7 +333,6 @@ def chunks_to_index_and_embed(
     embed_dim = BERT_MODEL_DIM,
     index_file = 'knn.index',
 ):
-    embedding_path = f'{chunk_memmap_path}.embedded'
     embed_shape = (num_chunks, embed_dim)
 
     chunks_to_embeddings_(
@@ -383,12 +383,21 @@ def chunks_to_precalculated_knn_(
 
     # fetch the faiss index and calculated embeddings for the chunks
 
-    index, embeddings = chunks_to_index_and_embed(
-        num_chunks = num_chunks,
-        chunk_size = chunk_size,
-        chunk_memmap_path = chunk_memmap_path,
-        index_file = index_file,
-    )
+    embed_shape = (num_chunks, embed_dim)
+    embedding_path = f'{chunk_memmap_path}.embedded'
+    if index_path.exists() and Path(embedding_path).exists() and not force_reprocess:
+        print('using pre-computed faiss index reconstituted from {str(index_path)}, embeddings found at {str(embedding_path)}')
+        index = faiss_read_index(index_path)
+        embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+    else:
+        index, embeddings = chunks_to_index_and_embed(
+            num_chunks = num_chunks,
+            chunk_size = chunk_size,
+            embedding_path = embedding_path,
+            embed_dim = embed_dim,
+            chunk_memmap_path = chunk_memmap_path,
+            index_file = index_file,
+        )
 
     total_neighbors_to_fetch = num_extra_neighbors + num_nearest_neighbors + 1
 
