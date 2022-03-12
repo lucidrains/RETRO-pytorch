@@ -224,15 +224,29 @@ def chunks_to_embeddings_(
     embed_dim = BERT_MODEL_DIM,
     batch_size = 16,
     use_cls_repr = False,
-    pad_id = 0.
+    pad_id = 0.,
+    worker_id = None,
+    num_workers = None,
 ):
     chunks_shape = (num_chunks, chunk_size + 1)
     embed_shape = (num_chunks, embed_dim)
 
-    with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
-        , memmap(embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = 'w+') as embeddings:
+    if worker_id is not None:
+        if not Path(embeddings_memmap_path).exists():
+            raise FileNotFoundError(f"When embedding with worker_ids, the numpy file must already exist to avoid accidental truncation of other worker output. Please create it by running import numpy as np; np.memmap('{embeddings_memmap_path}', shape={embed_shape}, dtype=np.float32, mode='w+') before running any workers.")
+        mode = 'r+'
+    else:
+        mode = 'w+'
+        
 
-        for dim_slice in range_chunked(num_chunks, batch_size = batch_size):
+    with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
+        , memmap(embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = mode) as embeddings:
+
+        for idx, dim_slice in enumerate(range_chunked(num_chunks, batch_size = batch_size)):
+            # If num_workers is 10, each worker does every 10'th batch (offset by worker_id)
+            if idx % num_workers != worker_id:
+                continue
+
             batch_chunk_npy = chunks[dim_slice]
 
             batch_chunk = torch.from_numpy(batch_chunk_npy)
