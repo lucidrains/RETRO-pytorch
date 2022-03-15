@@ -1,3 +1,5 @@
+from functools import partial
+
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
@@ -22,6 +24,17 @@ def divisible_by(val, divisor):
 
 def cast_tuple(val, num = 1):
     return val if isinstance(val, tuple) else ((val,) * num)
+
+# helper functions
+
+class Residual(nn.Module):
+    def __init__(self, fn, scale_residual = 1.):
+        super().__init__()
+        self.fn = fn
+        self.scale_residual = scale_residual
+
+    def forward(self, x, *args, **kwargs):
+        return self.fn(x, *args, **kwargs) + x * self.scale_residual
 
 # normalization
 
@@ -260,7 +273,8 @@ class Encoder(nn.Module):
         ff_mult = 4,
         ff_dropout = 0.,
         final_norm = True,
-        cross_attn_layers = None
+        cross_attn_layers = None,
+        scale_residual = 1.
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -268,13 +282,15 @@ class Encoder(nn.Module):
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
+        residual_wrapper = partial(Residual, scale_residual = scale_residual)
+
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
 
             self.layers.append(nn.ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal),
-                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
-                FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
+                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal)),
+                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
+                residual_wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
@@ -286,12 +302,12 @@ class Encoder(nn.Module):
         k_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
         for attn, cross_attn, ff in self.layers:
-            x = attn(x, mask = mask, pos_emb = q_pos_emb) + x
+            x = attn(x, mask = mask, pos_emb = q_pos_emb)
 
             if exists(cross_attn):
-                x = cross_attn(x, context = chunked_seq, pos_emb = (q_pos_emb, k_pos_emb)) + x
+                x = cross_attn(x, context = chunked_seq, pos_emb = (q_pos_emb, k_pos_emb))
 
-            x = ff(x) + x
+            x = ff(x)
 
         return self.norm_out(x)
 
@@ -308,22 +324,26 @@ class Decoder(nn.Module):
         ff_dropout = 0.,
         final_norm = True,
         cross_attn_layers = None,
-        chunk_size = 64
+        chunk_size = 64,
+        scale_residual = 1.
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
+
+        residual_wrapper = partial(Residual, scale_residual = scale_residual)
+
         self.chunk_size = chunk_size
 
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
 
             self.layers.append(nn.ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True),
-                ChunkedCrossAttention(chunk_size = chunk_size, dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout) if has_cross_attn else None,
-                FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout),
+                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True)),
+                residual_wrapper(ChunkedCrossAttention(chunk_size = chunk_size, dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
+                residual_wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
         self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
@@ -341,7 +361,7 @@ class Decoder(nn.Module):
             cross_attn_pos_emb = (cross_attn_q_pos_emb, cross_attn_k_pos_emb)
 
         for attn, cross_attn, ff in self.layers:
-            x = attn(x, pos_emb = self_attn_pos_emb) + x
+            x = attn(x, pos_emb = self_attn_pos_emb)
 
             if exists(cross_attn) and exists(retrieved):
                 x = cross_attn(
@@ -349,9 +369,9 @@ class Decoder(nn.Module):
                     context = retrieved,
                     context_mask = context_mask,
                     pos_emb = cross_attn_pos_emb
-                ) + x
+                )
 
-            x = ff(x) + x
+            x = ff(x)
 
         return self.norm_out(x)
 
@@ -376,7 +396,9 @@ class RETRO(nn.Module):
         dec_attn_dropout = 0.,
         dec_ff_dropout = 0.,
         chunk_size = 64,
-        pad_id = 0
+        pad_id = 0,
+        enc_scale_residual = 1.,
+        dec_scale_residual = 1.
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
@@ -396,7 +418,8 @@ class RETRO(nn.Module):
             depth = enc_depth,
             attn_dropout = enc_attn_dropout,
             ff_dropout = enc_ff_dropout,
-            cross_attn_layers = enc_cross_attn_layers
+            cross_attn_layers = enc_cross_attn_layers,
+            scale_residual = enc_scale_residual
         )
 
         self.decoder = Decoder(
@@ -405,7 +428,8 @@ class RETRO(nn.Module):
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
             cross_attn_layers = dec_cross_attn_layers,
-            chunk_size = chunk_size
+            chunk_size = chunk_size,
+            scale_residual = dec_scale_residual
         )
 
         self.to_logits = nn.Linear(dec_dim, num_tokens)
