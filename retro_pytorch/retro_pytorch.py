@@ -125,20 +125,21 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
-        self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
+        self.to_k = nn.Linear(dim, inner_dim, bias = False)
+        self.to_v = nn.Linear(dim, inner_dim, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
         # allowing for attending to nothing (null function)
         # and to save attention from breaking if all retrieved chunks are padded out
-        self.null_kv = nn.Parameter(torch.randn(2, inner_dim)) if null_kv else None
+        self.null_k = nn.Parameter(torch.randn(inner_dim)) if null_kv else None
+        self.null_v = nn.Parameter(torch.randn(inner_dim)) if null_kv else None
 
     def forward(self, x, mask = None, context = None, pos_emb = None):
         b, device, h, scale = x.shape[0], x.device, self.heads, self.scale
 
         kv_input = default(context, x)
 
-        q = self.to_q(x)
-        k, v = self.to_kv(kv_input).chunk(2, dim = -1)
+        q, k, v = self.to_q(x), self.to_k(kv_input), self.to_v(kv_input)
 
         # split heads
 
@@ -158,8 +159,8 @@ class Attention(nn.Module):
 
         # add null key / values
 
-        if exists(self.null_kv):
-            nk, nv = self.null_kv.unbind(dim = 0)
+        if exists(self.null_k):
+            nk, nv = self.null_k, self.null_v
             nk, nv = map(lambda t: repeat(t, '(h d) -> b h 1 d', b = b, h = h), (nk, nv))
             k = torch.cat((nk, k), dim = -2)
             v = torch.cat((nv, v), dim = -2)
@@ -173,7 +174,7 @@ class Attention(nn.Module):
         mask_value = -torch.finfo(sim.dtype).max
 
         if exists(mask):
-            if exists(self.null_kv):
+            if exists(self.null_k):
                 mask = F.pad(mask, (1, 0), value = True)
 
             mask = rearrange(mask, 'b j -> b 1 1 j')
