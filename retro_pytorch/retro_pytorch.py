@@ -25,6 +25,20 @@ def divisible_by(val, divisor):
 def cast_tuple(val, num = 1):
     return val if isinstance(val, tuple) else ((val,) * num)
 
+# deepnet init
+
+def deepnorm_init(transformer, beta, module_name_match_list = ['.ff.', '.to_v', '.to_out']):
+    for name, module in transformer.named_modules():
+        if type(module) != nn.Linear:
+            continue
+
+        needs_beta_gain = any(map(lambda substr: substr in name, module_name_match_list))
+        gain = beta if needs_beta_gain else 1
+        nn.init.xavier_normal_(module.weight.data, gain = gain)
+
+        if exists(module.bias):
+            nn.init.constant_(module.bias.data, 0)
+
 # normalization
 
 class RMSNorm(nn.Module):
@@ -93,15 +107,20 @@ def apply_rotary_pos_emb(t, freqs):
 
 # feedforward
 
-def FeedForward(dim, mult = 4, dropout = 0.):
-    inner_dim = int(mult * dim)
+class FeedForward(nn.Module):
+    def __init__(self, dim, mult = 4, dropout = 0.):
+        super().__init__()
+        inner_dim = int(mult * dim)
 
-    return nn.Sequential(
-        nn.Linear(dim, inner_dim),
-        nn.GELU(),
-        nn.Dropout(dropout),
-        nn.Linear(inner_dim, dim)
-    )
+        self.ff = nn.Sequential(
+            nn.Linear(dim, inner_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(inner_dim, dim)
+        )
+
+    def forward(self, x):
+        return self.ff(x)
 
 # attention
 
@@ -433,7 +452,7 @@ class RETRO(nn.Module):
         # follow equation in Figure 2. in https://arxiv.org/abs/2203.00555
 
         if post_norm:
-            enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** (-1 / 16))
+            enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625)
             dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
             norm_klass = nn.LayerNorm
 
@@ -463,6 +482,12 @@ class RETRO(nn.Module):
         )
 
         self.to_logits = nn.Linear(dec_dim, num_tokens)
+
+        # deepnet has special init of weight matrices
+
+        if post_norm:
+            deepnorm_init(self.encoder, 0.87 * ((enc_depth ** 4) * dec_depth) ** -0.0625)
+            deepnorm_init(self.decoder, (12 * dec_depth) ** -0.25)
 
     def forward_without_retrieval(
         self,
