@@ -25,29 +25,6 @@ def divisible_by(val, divisor):
 def cast_tuple(val, num = 1):
     return val if isinstance(val, tuple) else ((val,) * num)
 
-# helper functions
-
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.fn = fn
-        self.norm = RMSNorm(dim)
-
-    def forward(self, x, *args, **kwargs):
-        return self.fn(self.norm(x), *args, **kwargs) + x
-
-class PostNorm(nn.Module):
-    def __init__(self, dim, fn, scale_residual = 1):
-        super().__init__()
-        self.fn = fn
-        self.scale_residual = scale_residual
-        self.norm = RMSNorm(dim)
-
-    def forward(self, x, *args, **kwargs):
-        residual = x * self.scale_residual
-        out = self.fn(x, *args, **kwargs) + residual
-        return self.norm(out)
-
 # normalization
 
 class RMSNorm(nn.Module):
@@ -65,6 +42,29 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         norm = x.norm(keepdim = True, dim = -1) * self.scale
         return (x / norm.clamp(min = self.eps)) * self.gamma
+
+# pre and post norm residual wrapper modules
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn, norm_klass = RMSNorm):
+        super().__init__()
+        self.fn = fn
+        self.norm = norm_klass(dim)
+
+    def forward(self, x, *args, **kwargs):
+        return self.fn(self.norm(x), *args, **kwargs) + x
+
+class PostNorm(nn.Module):
+    def __init__(self, dim, fn, scale_residual = 1, norm_klass = RMSNorm):
+        super().__init__()
+        self.fn = fn
+        self.scale_residual = scale_residual
+        self.norm = norm_klass(dim)
+
+    def forward(self, x, *args, **kwargs):
+        residual = x * self.scale_residual
+        out = self.fn(x, *args, **kwargs) + residual
+        return self.norm(out)
 
 # positional embedding
 
@@ -285,6 +285,7 @@ class Encoder(nn.Module):
         final_norm = True,
         cross_attn_layers = None,
         post_norm = False,
+        norm_klass = RMSNorm,
         scale_residual = 1.
     ):
         super().__init__()
@@ -293,7 +294,7 @@ class Encoder(nn.Module):
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
-        wrapper = partial(PreNorm, dim) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual)
+        wrapper = partial(PreNorm, dim, norm_klass = norm_klass) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual, norm_klass = norm_klass)
 
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
@@ -304,7 +305,7 @@ class Encoder(nn.Module):
                 wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
-        self.norm_out = RMSNorm(dim) if final_norm and not post_norm else nn.Identity()
+        self.norm_out = norm_klass(dim) if final_norm and not post_norm else nn.Identity()
 
     def forward(self, x, *, mask = None, chunked_seq):
         device, chunk_size, seq_len = x.device, x.shape[-2], chunked_seq.shape[-2]
@@ -337,6 +338,7 @@ class Decoder(nn.Module):
         cross_attn_layers = None,
         chunk_size = 64,
         post_norm = False,
+        norm_klass = RMSNorm,
         scale_residual = 1.
     ):
         super().__init__()
@@ -345,7 +347,7 @@ class Decoder(nn.Module):
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
-        wrapper = partial(PreNorm, dim) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual)
+        wrapper = partial(PreNorm, dim, norm_klass = norm_klass) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual, norm_klass = norm_klass)
 
         self.chunk_size = chunk_size
 
@@ -411,6 +413,7 @@ class RETRO(nn.Module):
         pad_id = 0,
         enc_scale_residual = None,
         dec_scale_residual = None,
+        norm_klass = None,
         post_norm = False
     ):
         super().__init__()
@@ -432,6 +435,7 @@ class RETRO(nn.Module):
         if post_norm:
             enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** (-1 / 16))
             dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
+            norm_klass = nn.LayerNorm
 
         # define encoder and decoders
 
@@ -442,6 +446,7 @@ class RETRO(nn.Module):
             ff_dropout = enc_ff_dropout,
             cross_attn_layers = enc_cross_attn_layers,
             post_norm = post_norm,
+            norm_klass = norm_klass,
             scale_residual = enc_scale_residual
         )
 
@@ -453,6 +458,7 @@ class RETRO(nn.Module):
             cross_attn_layers = dec_cross_attn_layers,
             chunk_size = chunk_size,
             post_norm = post_norm,
+            norm_klass = norm_klass,
             scale_residual = dec_scale_residual
         )
 
