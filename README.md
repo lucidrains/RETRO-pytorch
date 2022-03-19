@@ -337,4 +337,14 @@ chunks_to_precalculated_knn_(
 }
 ```
 
+```bibtex
+@article{Wang2022DeepNetST,
+    title   = {DeepNet: Scaling Transformers to 1, 000 Layers},
+    author  = {Hongyu Wang and Shuming Ma and Li Dong and Shaohan Huang and Dongdong Zhang and Furu Wei},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2203.00555}
+}
+```
+
 *I consider always the adult life to be the continuous retrieval of childhood.* - Umberto Eco
