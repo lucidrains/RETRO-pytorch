@@ -433,7 +433,7 @@ class RETRO(nn.Module):
         enc_scale_residual = None,
         dec_scale_residual = None,
         norm_klass = None,
-        post_norm = False
+        use_deepnet = False
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
@@ -451,7 +451,7 @@ class RETRO(nn.Module):
         # for deepnet, residual scales
         # follow equation in Figure 2. in https://arxiv.org/abs/2203.00555
 
-        if post_norm:
+        if use_deepnet:
             enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625)
             dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
             norm_klass = nn.LayerNorm
@@ -464,7 +464,7 @@ class RETRO(nn.Module):
             attn_dropout = enc_attn_dropout,
             ff_dropout = enc_ff_dropout,
             cross_attn_layers = enc_cross_attn_layers,
-            post_norm = post_norm,
+            post_norm = use_deepnet,
             norm_klass = norm_klass,
             scale_residual = enc_scale_residual
         )
@@ -476,7 +476,7 @@ class RETRO(nn.Module):
             ff_dropout = dec_ff_dropout,
             cross_attn_layers = dec_cross_attn_layers,
             chunk_size = chunk_size,
-            post_norm = post_norm,
+            post_norm = use_deepnet,
             norm_klass = norm_klass,
             scale_residual = dec_scale_residual
         )
@@ -485,7 +485,7 @@ class RETRO(nn.Module):
 
         # deepnet has special init of weight matrices
 
-        if post_norm:
+        if use_deepnet:
             deepnorm_init(self.encoder, 0.87 * ((enc_depth ** 4) * dec_depth) ** -0.0625)
             deepnorm_init(self.decoder, (12 * dec_depth) ** -0.25)
 
