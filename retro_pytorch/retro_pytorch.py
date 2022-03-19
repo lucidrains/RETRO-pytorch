@@ -408,8 +408,8 @@ class RETRO(nn.Module):
         dec_ff_dropout = 0.,
         chunk_size = 64,
         pad_id = 0,
-        enc_scale_residual = 1.,
-        dec_scale_residual = 1.,
+        enc_scale_residual = None,
+        dec_scale_residual = None,
         post_norm = False
     ):
         super().__init__()
@@ -424,6 +424,15 @@ class RETRO(nn.Module):
 
         self.to_decoder_model_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
         self.encoder_output_to_decoder_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
+
+        # for deepnet, residual scales
+        # follow equation in Figure 2. in https://arxiv.org/abs/2203.00555
+
+        if post_norm:
+            enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** (-1 / 16))
+            dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
+
+        # define encoder and decoders
 
         self.encoder = Encoder(
             dim = enc_dim,
