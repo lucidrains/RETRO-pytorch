@@ -27,14 +27,26 @@ def cast_tuple(val, num = 1):
 
 # helper functions
 
-class Residual(nn.Module):
-    def __init__(self, fn, scale_residual = 1.):
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.fn = fn
+        self.norm = RMSNorm(dim)
+
+    def forward(self, x, *args, **kwargs):
+        return self.fn(self.norm(x), *args, **kwargs) + x
+
+class PostNorm(nn.Module):
+    def __init__(self, dim, fn, scale_residual = 1):
         super().__init__()
         self.fn = fn
         self.scale_residual = scale_residual
+        self.norm = RMSNorm(dim)
 
     def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x * self.scale_residual
+        residual = x * self.scale_residual
+        x = self.fn(x, *args, **kwargs) + x
+        return self.norm(x) + residual
 
 # normalization
 
@@ -85,7 +97,6 @@ def FeedForward(dim, mult = 4, dropout = 0.):
     inner_dim = int(mult * dim)
 
     return nn.Sequential(
-        RMSNorm(dim),
         nn.Linear(dim, inner_dim),
         nn.GELU(),
         nn.Dropout(dropout),
@@ -111,7 +122,6 @@ class Attention(nn.Module):
         self.causal = causal
         inner_dim = dim_head * heads
 
-        self.norm = RMSNorm(dim)
         self.dropout = nn.Dropout(dropout)
 
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
@@ -125,7 +135,6 @@ class Attention(nn.Module):
     def forward(self, x, mask = None, context = None, pos_emb = None):
         b, device, h, scale = x.shape[0], x.device, self.heads, self.scale
 
-        x = self.norm(x)
         kv_input = default(context, x)
 
         q = self.to_q(x)
@@ -274,6 +283,7 @@ class Encoder(nn.Module):
         ff_dropout = 0.,
         final_norm = True,
         cross_attn_layers = None,
+        post_norm = False,
         scale_residual = 1.
     ):
         super().__init__()
@@ -282,18 +292,18 @@ class Encoder(nn.Module):
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
-        residual_wrapper = partial(Residual, scale_residual = scale_residual)
+        wrapper = partial(PreNorm, dim) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual)
 
         for layer_num in range(1, depth + 1):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
 
             self.layers.append(nn.ModuleList([
-                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal)),
-                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
-                residual_wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
+                wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = causal)),
+                wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
+                wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
-        self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
+        self.norm_out = RMSNorm(dim) if final_norm and not post_norm else nn.Identity()
 
     def forward(self, x, *, mask = None, chunked_seq):
         device, chunk_size, seq_len = x.device, x.shape[-2], chunked_seq.shape[-2]
@@ -325,6 +335,7 @@ class Decoder(nn.Module):
         final_norm = True,
         cross_attn_layers = None,
         chunk_size = 64,
+        post_norm = False,
         scale_residual = 1.
     ):
         super().__init__()
@@ -333,7 +344,7 @@ class Decoder(nn.Module):
         rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
-        residual_wrapper = partial(Residual, scale_residual = scale_residual)
+        wrapper = partial(PreNorm, dim) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual)
 
         self.chunk_size = chunk_size
 
@@ -341,12 +352,12 @@ class Decoder(nn.Module):
             has_cross_attn = not exists(cross_attn_layers) or layer_num in cross_attn_layers
 
             self.layers.append(nn.ModuleList([
-                residual_wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True)),
-                residual_wrapper(ChunkedCrossAttention(chunk_size = chunk_size, dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
-                residual_wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
+                wrapper(Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout, causal = True)),
+                wrapper(ChunkedCrossAttention(chunk_size = chunk_size, dim = dim, dim_head = dim_head, heads = heads, dropout = attn_dropout)) if has_cross_attn else None,
+                wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
-        self.norm_out = RMSNorm(dim) if final_norm else nn.Identity()
+        self.norm_out = RMSNorm(dim) if final_norm and not post_norm else nn.Identity()
 
     def forward(self, x, *, context_mask = None, retrieved = None):
         device, seq_len = x.device, x.shape[-2]
@@ -398,7 +409,8 @@ class RETRO(nn.Module):
         chunk_size = 64,
         pad_id = 0,
         enc_scale_residual = 1.,
-        dec_scale_residual = 1.
+        dec_scale_residual = 1.,
+        post_norm = False
     ):
         super().__init__()
         assert dim_head >= MIN_DIM_HEAD, f'dimension per head must be greater than {MIN_DIM_HEAD}'
@@ -419,6 +431,7 @@ class RETRO(nn.Module):
             attn_dropout = enc_attn_dropout,
             ff_dropout = enc_ff_dropout,
             cross_attn_layers = enc_cross_attn_layers,
+            post_norm = post_norm,
             scale_residual = enc_scale_residual
         )
 
@@ -429,6 +442,7 @@ class RETRO(nn.Module):
             ff_dropout = dec_ff_dropout,
             cross_attn_layers = dec_cross_attn_layers,
             chunk_size = chunk_size,
+            post_norm = post_norm,
             scale_residual = dec_scale_residual
         )
 
