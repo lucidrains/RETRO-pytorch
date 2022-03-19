@@ -33,7 +33,8 @@ retro = RETRO(
     heads = 8,                               # attention heads
     dim_head = 64,                           # dimension per head
     dec_attn_dropout = 0.25,                 # decoder attention dropout
-    dec_ff_dropout = 0.25                    # decoder feedforward dropout
+    dec_ff_dropout = 0.25,                   # decoder feedforward dropout
+    post_norm = True                         # turn on post-normalization with DeepNet residual scaling and initialization, for scaling to 1000 layers
 )
 
 seq = torch.randint(0, 20000, (2, 2048 + 1))      # plus one since it is split into input and labels for training
