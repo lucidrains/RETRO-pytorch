@@ -10,6 +10,8 @@ This library leverages <a href="https://github.com/criteo/autofaiss">autofaiss</
 
 The selling point of this retriever approach is reaching GPT-3 performance at 10x less parameters. More research is <a href="https://arxiv.org/abs/2009.06857">definitely deserved</a> in this area.
 
+I have also included the features necessary to scale the retrieval transformer to 1000 layers, if the claims of <a href="https://arxiv.org/abs/2203.00555">DeepNet paper</a> is to be believed.
+
 ## Install
 
 ```bash
