@@ -12,6 +12,8 @@ The selling point of this retriever approach is reaching GPT-3 performance at 10
 
 I have also included the features necessary to scale the retrieval transformer to 1000 layers, if the claims of <a href="https://arxiv.org/abs/2203.00555">DeepNet paper</a> is to be believed.
 
+Update: Someone on Reddit has gifted me a <a href="https://old.reddit.com/r/MachineLearning/comments/s4f1p8/d_is_there_an_opensource_implementation_of_the/hstia5r/">Gold Award</a>. Not sure what it is, but thank you! 🙏
+
 ## Install
 
 ```bash
