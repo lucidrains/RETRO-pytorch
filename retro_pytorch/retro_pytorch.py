@@ -46,16 +46,23 @@ class RMSNorm(nn.Module):
         self,
         dim,
         *,
-        eps = 1e-8
+        eps = 1e-8,
+        gated = False
     ):
         super().__init__()
         self.eps = eps
         self.scale = dim ** -0.5
         self.gamma = nn.Parameter(torch.ones(dim))
+        self.weight = nn.Parameter(torch.ones(dim)) if gated else None
 
     def forward(self, x):
         norm = x.norm(keepdim = True, dim = -1) * self.scale
-        return (x / norm.clamp(min = self.eps)) * self.gamma
+        out = (x / norm.clamp(min = self.eps)) * self.gamma
+
+        if not exists(self.weight):
+            return out
+
+        return out * (x * self.weight).sigmoid()
 
 # pre and post norm residual wrapper modules
 
@@ -379,7 +386,7 @@ class Decoder(nn.Module):
                 wrapper(FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)),
             ]))
 
-        self.norm_out = RMSNorm(dim) if final_norm and not post_norm else nn.Identity()
+        self.norm_out = norm_klass(dim) if final_norm and not post_norm else nn.Identity()
 
     def forward(self, x, *, context_mask = None, retrieved = None):
         device, seq_len = x.device, x.shape[-2]
@@ -433,6 +440,7 @@ class RETRO(nn.Module):
         enc_scale_residual = None,
         dec_scale_residual = None,
         norm_klass = None,
+        gated_rmsnorm = False,
         use_deepnet = False
     ):
         super().__init__()
@@ -455,6 +463,11 @@ class RETRO(nn.Module):
             enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625)
             dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
             norm_klass = nn.LayerNorm
+
+        # allow for gated rmsnorm
+
+        if gated_rmsnorm:
+            norm_klass = partial(RMSNorm, gated = True)
 
         # define encoder and decoders
 

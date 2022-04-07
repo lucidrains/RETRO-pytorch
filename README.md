@@ -352,4 +352,15 @@ chunks_to_precalculated_knn_(
 }
 ```
 
+```bibtex
+@misc{zhang2021sparse,
+    title   = {Sparse Attention with Linear Units},
+    author  = {Biao Zhang and Ivan Titov and Rico Sennrich},
+    year    = {2021},
+    eprint  = {2104.07012},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
+}
+```
+
 *I consider always the adult life to be the continuous retrieval of childhood.* - Umberto Eco
