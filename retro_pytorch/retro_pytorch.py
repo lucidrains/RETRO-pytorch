@@ -322,7 +322,10 @@ class Encoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
-        rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
+        # partial rotary embeddings, which is better than full rotary
+        # Wang and Komatsuzaki et al https://github.com/kingoflolz/mesh-transformer-jax/
+
+        rotary_emb_dim = min(dim_head, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
         wrapper = partial(PreNorm, dim, norm_klass = norm_klass) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual, norm_klass = norm_klass)
@@ -377,7 +380,10 @@ class Decoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
-        rotary_emb_dim = max(dim_head // 2, MIN_DIM_HEAD)
+        # partial rotary embeddings, which is better than full rotary
+        # Wang and Komatsuzaki et al https://github.com/kingoflolz/mesh-transformer-jax/
+
+        rotary_emb_dim = min(dim_head, MIN_DIM_HEAD)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim)
 
         wrapper = partial(PreNorm, dim, norm_klass = norm_klass) if not post_norm else partial(PostNorm, dim, scale_residual = scale_residual, norm_klass = norm_klass)
