@@ -10,6 +10,10 @@ This library leverages <a href="https://github.com/criteo/autofaiss">autofaiss</
 
 The selling point of this retriever approach is reaching GPT-3 performance at 10x less parameters. More research is <a href="https://arxiv.org/abs/2009.06857">definitely deserved</a> in this area.
 
+I have also included the features necessary to scale the retrieval transformer to 1000 layers, if the claims of <a href="https://arxiv.org/abs/2203.00555">DeepNet paper</a> is to be believed.
+
+Update: Someone on Reddit has gifted me a <a href="https://old.reddit.com/r/MachineLearning/comments/s4f1p8/d_is_there_an_opensource_implementation_of_the/hstia5r/">Gold Award</a>. Not sure what it is, but thank you! 🙏
+
 ## Install
 
 ```bash
@@ -33,7 +37,8 @@ retro = RETRO(
     heads = 8,                               # attention heads
     dim_head = 64,                           # dimension per head
     dec_attn_dropout = 0.25,                 # decoder attention dropout
-    dec_ff_dropout = 0.25                    # decoder feedforward dropout
+    dec_ff_dropout = 0.25,                   # decoder feedforward dropout
+    use_deepnet = True                       # turn on post-normalization with DeepNet residual scaling and initialization, for scaling to 1000 layers
 )
 
 seq = torch.randint(0, 20000, (2, 2048 + 1))      # plus one since it is split into input and labels for training
@@ -332,6 +337,27 @@ chunks_to_precalculated_knn_(
     author  = {Jianlin Su and Yu Lu and Shengfeng Pan and Bo Wen and Yunfeng Liu},
     year    = {2021},
     eprint  = {2104.09864},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
+}
+```
+
+```bibtex
+@article{Wang2022DeepNetST,
+    title   = {DeepNet: Scaling Transformers to 1, 000 Layers},
+    author  = {Hongyu Wang and Shuming Ma and Li Dong and Shaohan Huang and Dongdong Zhang and Furu Wei},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2203.00555}
+}
+```
+
+```bibtex
+@misc{zhang2021sparse,
+    title   = {Sparse Attention with Linear Units},
+    author  = {Biao Zhang and Ivan Titov and Rico Sennrich},
+    year    = {2021},
+    eprint  = {2104.07012},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
 }
