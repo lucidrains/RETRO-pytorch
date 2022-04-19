@@ -266,7 +266,7 @@ def memmap_file_to_chunks_(
         reset_folder_(root_path)
 
         for ind, dim_slice in enumerate(range_chunked(rows, batch_size = max_rows_per_file)):
-            filename = root_path / f'{ind}.npy'
+            filename = root_path / f'{ind:05d}.npy'
             data_slice = f[dim_slice]
 
             np.save(str(filename), f[dim_slice])
