@@ -1,6 +1,7 @@
 from pathlib import Path
 from math import ceil
 from math import sqrt
+import jsonlines
 
 import torch
 import torch.nn.functional as F
@@ -123,19 +124,39 @@ def doc_text_to_chunks_and_seq_indices(
 
     return chunks_with_extra_token, seq
 
+def text_folder_iterator(folder, glob):
+    paths = sorted([*Path(folder).glob(glob)])
+    for path in paths:
+        yield path.read_text()
+
 def text_folder_to_chunks_(
-    *,
     folder,
+    glob = '**/*.txt',
+    **text_to_chunks_kwargs,
+):
+    return _text_to_chunks(
+        text_iterator = text_folder_iterator(folder, glob),
+        **text_to_chunks_kwargs)
+
+def jsonl_iterator(fname):
+    with jsonlines.open(fname) as reader:
+        for obj in reader:
+            yield obj['text']
+
+def jsonl_to_chunks_(fname, **text_to_chunks_kwargs):
+    return _text_to_chunks(text_iterator=jsonl_iterator(fname), **text_to_chunks_kwargs) 
+
+def _text_to_chunks(
+    *,
+    text_iterator,
     chunks_memmap_path,
     seqs_memmap_path,
     doc_ids_memmap_path,
     chunk_size = 64,
     seq_len = 2048,
-    glob = '**/*.txt',
     max_chunks = 1_000_000,
     max_seqs = 100_000
 ):
-    paths = sorted([*Path(folder).glob(glob)])
 
     total_chunks = 0
     total_docs = 0
@@ -149,11 +170,9 @@ def text_folder_to_chunks_(
         , memmap(seqs_memmap_path, shape = seqs_shape, dtype = np.int32, mode = 'w+') as seqs_memmap\
         , memmap(doc_ids_memmap_path, shape = doc_ids_shape, dtype = np.int32, mode = 'w+') as doc_ids_memmap:
 
-        for path in paths:
-            print(f'processing {path}')
-
+        for text in text_iterator:
             chunks, seq = doc_text_to_chunks_and_seq_indices(
-                doc_text = path.read_text(),
+                doc_text = text,
                 chunk_size = chunk_size,
                 seq_len = seq_len
             )
