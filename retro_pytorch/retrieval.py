@@ -283,7 +283,6 @@ def chunks_to_embeddings_(
             embeddings[dim_slice] = batch_embed.detach().cpu().numpy()
             print(f'embedded {dim_slice.stop} / {num_chunks}')
 
-
 def index_embeddings(
     embeddings_path,
     embed_shape,
