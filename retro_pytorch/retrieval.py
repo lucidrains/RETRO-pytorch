@@ -188,6 +188,9 @@ def _text_to_chunks(
             total_seqs += doc_seq_len
             total_docs += 1
 
+            if total_docs % 1000 == 0:
+                print(f'Processed {total_docs} docs')
+
     return dict(
         chunks = total_chunks,
         docs = total_docs,
