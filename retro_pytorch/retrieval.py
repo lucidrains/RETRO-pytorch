@@ -180,6 +180,10 @@ def _text_to_chunks(
             doc_chunk_len = chunks.shape[0]
             doc_seq_len = seq.shape[0]
 
+            if doc_chunk_len > max_chunks - total_chunks or doc_seq_len > max_seqs - total_seqs:
+                print(f'Hit max seqs / chunks, stopping')
+                break
+
             chunks_memmap[total_chunks:(total_chunks + doc_chunk_len)] = chunks.numpy()
             seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy() + total_chunks
             doc_ids_memmap[total_chunks:(total_chunks + doc_chunk_len)] = np.full((doc_chunk_len,), total_docs)
