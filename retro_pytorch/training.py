@@ -99,7 +99,7 @@ def knn_chunks_from_seq_chunks(
 
     # retrieval of knn with faiss
 
-    _, knn_indices = faiss_index.search(embeds.numpy(), k = knn)
+    _, knn_indices = faiss_index.search(embeds.cpu().numpy(), k = knn)
 
     # numpy to torch
 
