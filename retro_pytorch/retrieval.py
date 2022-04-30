@@ -292,7 +292,7 @@ def index_embeddings(
         metric_type = "l2",
         max_index_memory_usage = max_index_memory_usage,
         current_memory_available = current_memory_available,
-        make_direct_map = True
+        make_direct_map = True,
         should_be_memory_mappable = False,
         use_gpu = torch.cuda.is_available(),
     )
