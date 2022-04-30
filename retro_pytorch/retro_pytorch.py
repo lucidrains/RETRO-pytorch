@@ -401,7 +401,7 @@ class Decoder(nn.Module):
 
         self.norm_out = norm_klass(dim) if final_norm and not post_norm else nn.Identity()
 
-    def forward(self, x, encoder, *, encoder_retrieved_mask = None, context_mask = None, retrieved = None):
+    def forward(self, x, *, encoder = None, encoder_retrieved_mask = None, context_mask = None, retrieved = None):
         device, seq_len = x.device, x.shape[-2]
         self_attn_pos_emb = self.rotary_pos_emb(seq_len, device = device)
 
@@ -634,7 +634,7 @@ class RETRO(nn.Module):
 
         embed = self.decoder(
             embed,
-            self.encoder,
+            encoder = self.encoder,
             context_mask = decoder_retrieved_mask,
             encoder_retrieved_mask = encoder_retrieved_mask,
             retrieved = retrieved
