@@ -488,7 +488,6 @@ class RETRO(nn.Module):
         self.chunk_size = chunk_size
 
         self.to_decoder_model_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
-        self.encoder_output_to_decoder_dim = nn.Linear(enc_dim, dec_dim) if enc_dim != dec_dim else nn.Identity()
 
         # for deepnet, residual scales
         # follow equation in Figure 2. in https://arxiv.org/abs/2203.00555
