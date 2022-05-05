@@ -162,6 +162,8 @@ class TrainingWrapper(nn.Module):
                 max_chunks = max_chunks,
                 max_seqs = max_seqs
             )
+            with open(processed_stats_json_path, 'w') as f:
+                json.dump(self.stats, f)
         else:
             print(f'found to be previously processed at {str(stats_path)}')
             self.stats = json.loads(stats_path.read_text())
