@@ -97,3 +97,11 @@ class BertEmbeds:
             else:
                 self.part1[key.start:self.max_rows_per_file] = val[:self.max_rows_per_file - key.start]
                 self.part2[:key.stop - self.max_rows_per_file] = val[self.max_rows_per_file - key.start:]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        del self.part1
+        if hasattr(self, 'part2'):
+            del self.part2
