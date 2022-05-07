@@ -11,7 +11,7 @@ from einops import rearrange
 
 import faiss
 
-from retro_pytorch.utils import memmap, reset_folder_
+from retro_pytorch.utils import memmap, reset_folder_, BertEmbeds
 
 # constants
 
@@ -258,15 +258,15 @@ def chunks_to_embeddings_(
     embed_shape = (num_chunks, embed_dim)
 
     if worker_id is not None:
-        if not Path(embeddings_memmap_path).exists():
-            raise FileNotFoundError(f"When embedding with worker_ids, the numpy file must already exist to avoid accidental truncation of other worker output. Please create it by running import numpy as np; np.memmap('{embeddings_memmap_path}', shape={embed_shape}, dtype=np.float32, mode='w+') before running any workers.")
+        if not Path(embeddings_memmap_path + '.part1').exists():
+            raise FileNotFoundError(f"When embedding with worker_ids, the numpy file must already exist to avoid accidental truncation of other worker output. Please create it by running from retro_pytorch.utils import BertEmbeds; BertEmbeds(fname = '{embeddings_memmap_path}', shape={embed_shape}, dtype=np.float32, mode='w+') before running any workers.")
         mode = 'r+'
     else:
         mode = 'w+'
         
 
     with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
-        , memmap(embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = mode) as embeddings:
+        , BertEmbeds(fname=embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = mode) as embeddings:
 
         for idx, dim_slice in enumerate(range_chunked(num_chunks, batch_size = batch_size)):
             # If num_workers is 10, each worker does every 10'th batch (offset by worker_id)
@@ -298,7 +298,7 @@ def index_embeddings(
 ):
     index_path = INDEX_FOLDER_PATH / index_file
     reset_folder_(INDEX_FOLDER_PATH)
-    embeddings = np.memmap(embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+    embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
 
     # Per https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
     if embeddings.shape[0] < 1_000_000:
@@ -316,6 +316,7 @@ def index_embeddings(
     # See https://github.com/facebookresearch/faiss/wiki/The-index-factory for what this string means.
     # Note that the IndexIVFPQFastScan index created by this factory is intended for use on AVX2 enabled CPUs.
     # Also note that this index requires *at least* ~16x4 bits of RAM for every stored vector.
+    # That's around 43 GB for 5.8B vectors.
     index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ4_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
 
     # From https://gist.github.com/mdouze/46d6bbbaabca0b9778fca37ed2bcccf6
@@ -333,6 +334,9 @@ def index_embeddings(
         train_indices = np.random.choice(embeddings.shape[0], size=num_train_examples, replace=False)
         # Note: sorting 400M indices is actually pretty fast (under 20s)
         train_indices = np.sort(train_indices)
+        print(f'Done sorting...')
+        # This makes a copy in RAM and should be at most 167 GB (1048576 * 64 * 21376 bits).
+        # TODO (mitchg) - we're probably going to need to do something about this.
         train_embeds = embeddings[train_indices, :]
     else:
         train_embeds = embeddings
@@ -376,7 +380,7 @@ def chunks_to_index_and_embed(
         index_file = index_file,
     )
 
-    embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+    embeddings = BertEmbeds(fname = embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
     return index, embeddings
 
 def chunks_to_precalculated_knn_(
@@ -413,7 +417,7 @@ def chunks_to_precalculated_knn_(
     if index_path.exists() and Path(embedding_path).exists() and not force_reprocess:
         print('using pre-computed faiss index reconstituted from {str(index_path)}, embeddings found at {str(embedding_path)}')
         index = faiss_read_index(index_path)
-        embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+        embeddings = BertEmbeds(fname = embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
     else:
         index, embeddings = chunks_to_index_and_embed(
             num_chunks = num_chunks,
