@@ -330,18 +330,13 @@ def index_embeddings(
     index.nprobe = 5
 
     if num_train_examples < embeddings.shape[0]:
-        print(f'Selecting random subset to train with...')
-        train_indices = np.random.choice(embeddings.shape[0], size=num_train_examples, replace=False)
-        # Note: sorting 400M indices is actually pretty fast (under 20s)
-        train_indices = np.sort(train_indices)
-        print(f'Done sorting...')
-        # This makes a copy in RAM and should be at most 167 GB (1048576 * 64 * 21376 bits).
-        # TODO (mitchg) - we're probably going to need to do something about this.
-        train_embeds = embeddings[train_indices, :]
+        # This doesn't make a copy in RAM unless you cross the internal BERT filesize limit (10 TB)
+        train_embeds = embeddings[0:num_train_examples]
     else:
         train_embeds = embeddings
 
     print(f'Training...')
+    # Apparently FAISS plays nice with numpy memmap. 
     index.train(train_embeds)
     print(f'Adding embeds to index...')
     index.add(embeddings)
