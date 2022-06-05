@@ -320,6 +320,8 @@ def index_embeddings(
     index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ4_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
 
     # From https://gist.github.com/mdouze/46d6bbbaabca0b9778fca37ed2bcccf6
+    # For a sense of the speedup you get from using GPUs:
+    # Clustering 3.5M points to 50k clusters takes about 2 min on a V100 and 20 min on AVX2.
     print(f'Using {faiss.get_num_gpus()} gpus for index training')
     index_ivf = faiss.extract_index_ivf(index)
     clustering_index = faiss.index_cpu_to_all_gpus(faiss.IndexFlatL2(index_ivf.d))
@@ -339,7 +341,11 @@ def index_embeddings(
     # Apparently FAISS plays nice with numpy memmap. 
     index.train(train_embeds)
     print(f'Adding embeds to index...')
-    index.add(embeddings)
+    # Do it in chunks so we don't run out of RAM
+    for dim_slice in range_chunked(embeddings.shape[0], batch_size=128):
+        if dim_slice.start % (128 * 1000) == 0:
+            print(dim_slice.start)
+        index.add(embeddings[dim_slice])
 
     print(f'Writing index to {index_path}...')
     faiss.write_index(index, str(index_path))
