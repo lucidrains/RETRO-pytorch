@@ -340,6 +340,11 @@ def index_embeddings(
     print(f'Training...')
     # Apparently FAISS plays nice with numpy memmap. 
     index.train(train_embeds)
+
+    # Save the index immediately after training (which takes a long
+    # time) in case we fail for some reason to add the embeds to the index.
+    faiss.write_index(index, str(index_path) + '.trained')
+
     print(f'Adding embeds to index...')
     # Do it in chunks so we don't run out of RAM
     for dim_slice in range_chunked(embeddings.shape[0], batch_size=128):
