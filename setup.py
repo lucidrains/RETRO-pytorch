@@ -18,7 +18,6 @@ setup(
   ],
   install_requires=[
     'transformers',
-    'autofaiss',
     'einops>=0.3',
     'numpy',
     'sentencepiece',
