@@ -21,7 +21,6 @@ BERT_MODEL_DIM = 768
 BERT_VOCAB_SIZE = 28996
 
 TMP_PATH = Path('./.tmp')
-INDEX_FOLDER_PATH = TMP_PATH / '.index'
 EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
 # helper functions
@@ -293,11 +292,8 @@ def chunks_to_embeddings_(
 def index_embeddings(
     embeddings_path,
     embed_shape,
-    *,
-    index_file = 'knn.index',
+    index_path = 'knn.index',
 ):
-    index_path = INDEX_FOLDER_PATH / index_file
-    reset_folder_(INDEX_FOLDER_PATH)
     embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
 
     # Per https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
@@ -396,17 +392,16 @@ def chunks_to_precalculated_knn_(
     chunk_size,
     chunk_memmap_path,
     doc_ids_memmap_path,
+    index_path,
     use_cls_repr = False,
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
     num_extra_neighbors = 10,
     force_reprocess = False,
-    index_file = 'knn.index',
 ):
     chunk_path = Path(chunk_memmap_path)
     knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
-    index_path = INDEX_FOLDER_PATH / index_file
 
     # early return knn path and faiss index
     # unless if force_reprocess is True
