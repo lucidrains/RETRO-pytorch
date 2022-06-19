@@ -289,13 +289,7 @@ def chunks_to_embeddings_(
             embeddings[dim_slice] = batch_embed.detach().cpu().numpy()
             print(f'embedded {dim_slice.stop} / {num_chunks}')
 
-def index_embeddings(
-    embeddings_path,
-    embed_shape,
-    index_path = 'knn.index',
-):
-    embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
-
+def train_faiss_index(embeddings, index_path):
     # Per https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
     if embeddings.shape[0] < 1_000_000:
         num_clusters = int(sqrt(embeddings.shape[0]) * 8)
@@ -340,6 +334,21 @@ def index_embeddings(
     # Save the index immediately after training (which takes a long
     # time) in case we fail for some reason to add the embeds to the index.
     faiss.write_index(index, str(index_path) + '.trained')
+
+    return index
+
+def index_embeddings(
+    embeddings_path,
+    embed_shape,
+    index_path = 'knn.index',
+    pretrained_index_path = None
+):
+    embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+
+    if not pretrained_index_path:
+        index = train_faiss_index(embeddings, index_path)
+    else:
+        index = faiss.read_index(pretrained_index_path)
 
     print(f'Adding embeds to index...')
     # Do it in chunks so we don't run out of RAM
