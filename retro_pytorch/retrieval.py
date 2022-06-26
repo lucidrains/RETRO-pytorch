@@ -341,7 +341,8 @@ def index_embeddings(
     embeddings_path,
     embed_shape,
     index_path = 'knn.index',
-    pretrained_index_path = None
+    pretrained_index_path = None,
+    faiss_num_threads = None,
 ):
     embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
 
@@ -350,8 +351,16 @@ def index_embeddings(
     else:
         index = faiss.read_index(pretrained_index_path)
 
+    if faiss_num_threads:
+        # mitchg - I've had problems running at the default thread
+        # count (10). Personally I've found 4 threads is the sweet
+        # spot here, not sure why. Maybe some kind of thrashing at
+        # higher threads?
+        faiss.omp_set_num_threads(faiss_num_threads)
+
     print(f'Adding embeds to index...')
-    # Do it in chunks so we don't run out of RAM
+    # Do it in chunks so we don't run out of RAM. For 5.8 B embeddings
+    # and 4 threads, this took around 1.2 days.
     for dim_slice in range_chunked(embeddings.shape[0], batch_size=128):
         if dim_slice.start % (128 * 1000) == 0:
             print(dim_slice.start)
