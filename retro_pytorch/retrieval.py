@@ -360,10 +360,15 @@ def index_embeddings(
 
     print(f'Adding embeds to index...')
     # Do it in chunks so we don't run out of RAM. For 5.8 B embeddings
-    # and 4 threads, this took around 1.2 days.
+    # and 4 threads, this took around 2 days.
+    last_billion = 0
     for dim_slice in range_chunked(embeddings.shape[0], batch_size=128):
         if dim_slice.start % (128 * 1000) == 0:
             print(dim_slice.start)
+            if dim_slice.start // 1_000_000_000 > last_billion:
+                last_billion += 1
+                print(f'Writing index to {index_path} ({last_billion} billion)...')
+                faiss.write_index(index, str(index_path))
         index.add(embeddings[dim_slice])
 
     print(f'Writing index to {index_path}...')
