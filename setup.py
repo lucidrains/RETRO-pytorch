@@ -3,9 +3,10 @@ from setuptools import setup, find_packages
 setup(
   name = 'retro-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.3.7',
+  version = '0.3.8',
   license='MIT',
   description = 'RETRO - Retrieval Enhanced Transformer - Pytorch',
+  long_description_content_type = 'text/markdown',
   author = 'Phil Wang',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/RETRO-pytorch',

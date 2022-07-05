@@ -492,6 +492,8 @@ class RETRO(nn.Module):
         # for deepnet, residual scales
         # follow equation in Figure 2. in https://arxiv.org/abs/2203.00555
 
+        norm_klass = default(norm_klass, RMSNorm)
+
         if use_deepnet:
             enc_scale_residual = default(enc_scale_residual, 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625)
             dec_scale_residual = default(dec_scale_residual, (3 * dec_depth) ** 0.25)
