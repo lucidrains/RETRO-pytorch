@@ -18,7 +18,7 @@ setup(
     'retrieval',
   ],
   install_requires=[
-    'autofaiss',
+    'transformers',
     'einops>=0.3',
     'numpy',
     'sentencepiece',
