@@ -306,7 +306,8 @@ def train_faiss_index(embeddings, index_path):
     # See https://github.com/facebookresearch/faiss/wiki/The-index-factory for what this string means.
     # Note that the IndexIVFPQFastScan index created by this factory is intended for use on AVX2 enabled CPUs.
     # Also note that this index requires *at least* ~16x4 bits of RAM for every stored vector.
-    # That's around 43 GB for 5.8B vectors.
+    # That's around 43 GB for 5.8B vectors. There are other overheads for each vector as well, including 
+    # an 8 byte vector id. In practice, the 5.8B vector index was around 176 GB in RAM.
     index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ16_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
 
     # From https://gist.github.com/mdouze/46d6bbbaabca0b9778fca37ed2bcccf6
