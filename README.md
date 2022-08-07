@@ -14,6 +14,8 @@ I have also included the features necessary to scale the retrieval transformer t
 
 Update: Someone on Reddit has gifted me a <a href="https://old.reddit.com/r/MachineLearning/comments/s4f1p8/d_is_there_an_opensource_implementation_of_the/hstia5r/">Gold Award</a>. Not sure what it is, but thank you! 🙏
 
+Update: Deepnorm has been validated at scale in a <a href="https://keg.cs.tsinghua.edu.cn/glm-130b/">130B model out of Tsinghua</a>. It is now recommended that you train with `use_deepnet` set to `True`
+
 ## Install
 
 ```bash
