@@ -1,5 +1,7 @@
 from pathlib import Path
 from math import ceil
+from math import sqrt
+import jsonlines
 
 import torch
 import torch.nn.functional as F
@@ -8,9 +10,8 @@ import numpy as np
 from einops import rearrange
 
 import faiss
-from autofaiss import build_index
 
-from retro_pytorch.utils import memmap, reset_folder_
+from retro_pytorch.utils import memmap, reset_folder_, BertEmbeds
 
 # constants
 
@@ -20,7 +21,6 @@ BERT_MODEL_DIM = 768
 BERT_VOCAB_SIZE = 28996
 
 TMP_PATH = Path('./.tmp')
-INDEX_FOLDER_PATH = TMP_PATH / '.index'
 EMBEDDING_TMP_SUBFOLDER = 'embeddings'
 
 # helper functions
@@ -123,19 +123,39 @@ def doc_text_to_chunks_and_seq_indices(
 
     return chunks_with_extra_token, seq
 
+def text_folder_iterator(folder, glob):
+    paths = sorted([*Path(folder).glob(glob)])
+    for path in paths:
+        yield path.read_text()
+
 def text_folder_to_chunks_(
-    *,
     folder,
+    glob = '**/*.txt',
+    **text_to_chunks_kwargs,
+):
+    return _text_to_chunks(
+        text_iterator = text_folder_iterator(folder, glob),
+        **text_to_chunks_kwargs)
+
+def jsonl_iterator(fname):
+    with jsonlines.open(fname) as reader:
+        for obj in reader:
+            yield obj['text']
+
+def jsonl_to_chunks_(fname, **text_to_chunks_kwargs):
+    return _text_to_chunks(text_iterator=jsonl_iterator(fname), **text_to_chunks_kwargs) 
+
+def _text_to_chunks(
+    *,
+    text_iterator,
     chunks_memmap_path,
     seqs_memmap_path,
     doc_ids_memmap_path,
     chunk_size = 64,
     seq_len = 2048,
-    glob = '**/*.txt',
     max_chunks = 1_000_000,
     max_seqs = 100_000
 ):
-    paths = sorted([*Path(folder).glob(glob)])
 
     total_chunks = 0
     total_docs = 0
@@ -149,17 +169,19 @@ def text_folder_to_chunks_(
         , memmap(seqs_memmap_path, shape = seqs_shape, dtype = np.int32, mode = 'w+') as seqs_memmap\
         , memmap(doc_ids_memmap_path, shape = doc_ids_shape, dtype = np.int32, mode = 'w+') as doc_ids_memmap:
 
-        for path in paths:
-            print(f'processing {path}')
-
+        for text in text_iterator:
             chunks, seq = doc_text_to_chunks_and_seq_indices(
-                doc_text = path.read_text(),
+                doc_text = text,
                 chunk_size = chunk_size,
                 seq_len = seq_len
             )
 
             doc_chunk_len = chunks.shape[0]
             doc_seq_len = seq.shape[0]
+
+            if doc_chunk_len > max_chunks - total_chunks or doc_seq_len > max_seqs - total_seqs:
+                print(f'Hit max seqs / chunks, stopping')
+                break
 
             chunks_memmap[total_chunks:(total_chunks + doc_chunk_len)] = chunks.numpy()
             seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy() + total_chunks
@@ -168,6 +190,9 @@ def text_folder_to_chunks_(
             total_chunks += doc_chunk_len
             total_seqs += doc_seq_len
             total_docs += 1
+
+            if total_docs % 1000 == 0:
+                print(f'Processed {total_docs} docs')
 
     return dict(
         chunks = total_chunks,
@@ -224,15 +249,29 @@ def chunks_to_embeddings_(
     embed_dim = BERT_MODEL_DIM,
     batch_size = 16,
     use_cls_repr = False,
-    pad_id = 0.
+    pad_id = 0.,
+    worker_id = None,
+    num_workers = None,
 ):
     chunks_shape = (num_chunks, chunk_size + 1)
     embed_shape = (num_chunks, embed_dim)
 
-    with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
-        , memmap(embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = 'w+') as embeddings:
+    if worker_id is not None:
+        if not Path(embeddings_memmap_path + '.part1').exists():
+            raise FileNotFoundError(f"When embedding with worker_ids, the numpy file must already exist to avoid accidental truncation of other worker output. Please create it by running from retro_pytorch.utils import BertEmbeds; BertEmbeds(fname = '{embeddings_memmap_path}', shape={embed_shape}, dtype=np.float32, mode='w+') before running any workers.")
+        mode = 'r+'
+    else:
+        mode = 'w+'
+        
 
-        for dim_slice in range_chunked(num_chunks, batch_size = batch_size):
+    with memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32) as chunks\
+        , BertEmbeds(fname=embeddings_memmap_path, shape = embed_shape, dtype = np.float32, mode = mode) as embeddings:
+
+        for idx, dim_slice in enumerate(range_chunked(num_chunks, batch_size = batch_size)):
+            # If num_workers is 10, each worker does every 10'th batch (offset by worker_id)
+            if idx % num_workers != worker_id:
+                continue
+
             batch_chunk_npy = chunks[dim_slice]
 
             batch_chunk = torch.from_numpy(batch_chunk_npy)
@@ -250,69 +289,105 @@ def chunks_to_embeddings_(
             embeddings[dim_slice] = batch_embed.detach().cpu().numpy()
             print(f'embedded {dim_slice.stop} / {num_chunks}')
 
+def train_faiss_index(embeddings, index_path):
+    # Per https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
+    if embeddings.shape[0] < 1_000_000:
+        num_clusters = int(sqrt(embeddings.shape[0]) * 8)
+    elif embeddings.shape[0] > 1_000_000 and embeddings.shape[0] < 10_000_000:
+        num_clusters = 65536
+    elif embeddings.shape[0] > 10_000_000 and embeddings.shape[0] < 100_000_000:
+        num_clusters = 262144
+    else:
+        num_clusters = 1048576
+    num_train_examples = min(num_clusters * 64, embeddings.shape[0])
+    print(f'Training an IVF index with {num_clusters} clusters on {num_train_examples} training examples (out of {embeddings.shape[0]} total vectors).')
 
-def memmap_file_to_chunks_(
-    memmap_path,
-    *,
-    folder,
-    shape,
-    dtype,
-    max_rows_per_file = 500
-):
-    rows, _ = shape
+    # This is the closest FAISS equivalent to Google's SCANN
+    # See https://github.com/facebookresearch/faiss/wiki/The-index-factory for what this string means.
+    # Note that the IndexIVFPQFastScan index created by this factory is intended for use on AVX2 enabled CPUs.
+    # Also note that this index requires *at least* ~16x4 bits of RAM for every stored vector.
+    # That's around 43 GB for 5.8B vectors. There are other overheads for each vector as well, including 
+    # an 8 byte vector id. In practice, the 5.8B vector index was around 176 GB in RAM.
+    index = faiss.index_factory(BERT_MODEL_DIM, f'OPQ16_64,IVF{num_clusters}_HNSW32,PQ16x4fs')
 
-    with memmap(memmap_path, shape = shape, dtype = dtype, mode = 'r') as f:
-        root_path = TMP_PATH / folder
-        reset_folder_(root_path)
+    # From https://gist.github.com/mdouze/46d6bbbaabca0b9778fca37ed2bcccf6
+    # For a sense of the speedup you get from using GPUs:
+    # Clustering 3.5M points to 50k clusters takes about 2 min on a V100 and 20 min on AVX2.
+    print(f'Using {faiss.get_num_gpus()} gpus for index training')
+    index_ivf = faiss.extract_index_ivf(index)
+    clustering_index = faiss.index_cpu_to_all_gpus(faiss.IndexFlatL2(index_ivf.d))
+    index_ivf.clustering_index = clustering_index
 
-        for ind, dim_slice in enumerate(range_chunked(rows, batch_size = max_rows_per_file)):
-            filename = root_path / f'{ind:05d}.npy'
-            data_slice = f[dim_slice]
+    # Look at all the embeddings in the top 5 closest voronoi cells when doing the IVF lookup
+    # TODO (mitchg) - tinker with this later
+    index.nprobe = 5
 
-            np.save(str(filename), f[dim_slice])
-            print(f'saved {str(filename)}')
+    if num_train_examples < embeddings.shape[0]:
+        # This doesn't make a copy in RAM unless you cross the internal BERT filesize limit (10 TB)
+        train_embeds = embeddings[0:num_train_examples]
+    else:
+        train_embeds = embeddings
+
+    print(f'Training...')
+    # Apparently FAISS plays nice with numpy memmap. 
+    index.train(train_embeds)
+
+    # Save the index immediately after training (which takes a long
+    # time) in case we fail for some reason to add the embeds to the index.
+    faiss.write_index(index, str(index_path) + '.trained')
+
+    return index
 
 def index_embeddings(
-    embeddings_folder,
-    *,
-    index_file = 'knn.index',
-    index_infos_file = 'index_infos.json',
-    max_index_memory_usage = '100m',
-    current_memory_available = '1G'
+    embeddings_path,
+    embed_shape,
+    index_path = 'knn.index',
+    pretrained_index_path = None,
+    faiss_num_threads = None,
 ):
-    embeddings_path = TMP_PATH / embeddings_folder
-    index_path = INDEX_FOLDER_PATH / index_file
+    embeddings = BertEmbeds(fname = embeddings_path, shape = embed_shape, dtype = np.float32, mode = 'r')
 
-    reset_folder_(INDEX_FOLDER_PATH)
+    if not pretrained_index_path:
+        index = train_faiss_index(embeddings, index_path)
+    else:
+        index = faiss.read_index(pretrained_index_path)
 
-    build_index(
-        embeddings = str(embeddings_path),
-        index_path = str(index_path),
-        index_infos_path = str(INDEX_FOLDER_PATH / index_infos_file),
-        metric_type = "l2",
-        max_index_memory_usage = max_index_memory_usage,
-        current_memory_available = current_memory_available,
-        make_direct_map = True,
-        should_be_memory_mappable = False,
-        use_gpu = torch.cuda.is_available(),
-    )
+    if faiss_num_threads:
+        # mitchg - I've had problems running at the default thread
+        # count (10). Personally I've found 4 threads is the sweet
+        # spot here, not sure why. Maybe some kind of thrashing at
+        # higher threads?
+        faiss.omp_set_num_threads(faiss_num_threads)
 
-    index = faiss_read_index(index_path)
+    print(f'Adding embeds to index...')
+    # Do it in chunks so we don't run out of RAM. For 5.8 B embeddings
+    # and 4 threads, this took around 2 days.
+    last_billion = 0
+    for dim_slice in range_chunked(embeddings.shape[0], batch_size=128):
+        if dim_slice.start % (128 * 1000) == 0:
+            print(dim_slice.start)
+            if dim_slice.start // 1_000_000_000 > last_billion:
+                last_billion += 1
+                print(f'Writing index to {index_path} ({last_billion} billion)...')
+                faiss.write_index(index, str(index_path))
+        index.add(embeddings[dim_slice])
+
+    print(f'Writing index to {index_path}...')
+    faiss.write_index(index, str(index_path))
     return index
 
 def chunks_to_index_and_embed(
     *,
     num_chunks,
     chunk_size,
+    embedding_path,
     chunk_memmap_path,
     use_cls_repr = False,
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
     index_file = 'knn.index',
-    **index_kwargs
 ):
-    embedding_path = f'{chunk_memmap_path}.embedded'
     embed_shape = (num_chunks, embed_dim)
 
     chunks_to_embeddings_(
@@ -325,21 +400,13 @@ def chunks_to_index_and_embed(
         embed_dim = embed_dim
     )
 
-    memmap_file_to_chunks_(
-        embedding_path,
-        shape = embed_shape,
-        dtype = np.float32,
-        folder = EMBEDDING_TMP_SUBFOLDER,
-        max_rows_per_file = max_rows_per_file
-    )
-
     index = index_embeddings(
-        embeddings_folder = EMBEDDING_TMP_SUBFOLDER,
+        embeddings_path=embedding_path,
+        embed_shape = embed_shape,
         index_file = index_file,
-        **index_kwargs
     )
 
-    embeddings = np.memmap(embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+    embeddings = BertEmbeds(fname = embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
     return index, embeddings
 
 def chunks_to_precalculated_knn_(
@@ -349,18 +416,16 @@ def chunks_to_precalculated_knn_(
     chunk_size,
     chunk_memmap_path,
     doc_ids_memmap_path,
+    index_path,
     use_cls_repr = False,
     max_rows_per_file = 500,
     chunks_to_embeddings_batch_size = 16,
     embed_dim = BERT_MODEL_DIM,
     num_extra_neighbors = 10,
     force_reprocess = False,
-    index_file = 'knn.index',
-    **index_kwargs
 ):
     chunk_path = Path(chunk_memmap_path)
     knn_path = chunk_path.parents[0] / f'{chunk_path.stem}.knn{chunk_path.suffix}'
-    index_path = INDEX_FOLDER_PATH / index_file
 
     # early return knn path and faiss index
     # unless if force_reprocess is True
@@ -372,13 +437,21 @@ def chunks_to_precalculated_knn_(
 
     # fetch the faiss index and calculated embeddings for the chunks
 
-    index, embeddings = chunks_to_index_and_embed(
-        num_chunks = num_chunks,
-        chunk_size = chunk_size,
-        chunk_memmap_path = chunk_memmap_path,
-        index_file = index_file,
-        **index_kwargs
-    )
+    embed_shape = (num_chunks, embed_dim)
+    embedding_path = f'{chunk_memmap_path}.embedded'
+    if index_path.exists() and Path(embedding_path).exists() and not force_reprocess:
+        print('using pre-computed faiss index reconstituted from {str(index_path)}, embeddings found at {str(embedding_path)}')
+        index = faiss_read_index(index_path)
+        embeddings = BertEmbeds(fname = embedding_path, shape = embed_shape, dtype = np.float32, mode = 'r')
+    else:
+        index, embeddings = chunks_to_index_and_embed(
+            num_chunks = num_chunks,
+            chunk_size = chunk_size,
+            embedding_path = embedding_path,
+            embed_dim = embed_dim,
+            chunk_memmap_path = chunk_memmap_path,
+            index_file = index_file,
+        )
 
     total_neighbors_to_fetch = num_extra_neighbors + num_nearest_neighbors + 1
 
