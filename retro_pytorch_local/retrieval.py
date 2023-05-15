@@ -10,7 +10,7 @@ from einops import rearrange
 import faiss
 from autofaiss import build_index
 
-from retro_pytorch.utils import memmap, reset_folder_
+from retro_pytorch_local.utils import memmap, reset_folder_
 
 # constants
 

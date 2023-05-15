@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 
-from retro_pytorch.retrieval import BERT_VOCAB_SIZE
+from retro_pytorch_local.retrieval import BERT_VOCAB_SIZE
 from einops import rearrange, repeat
 
 # constants

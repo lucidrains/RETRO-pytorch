@@ -8,11 +8,11 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from retro_pytorch import RETRO, RETRODataset
-from retro_pytorch.data import knn_to_retrieved_chunks
-from retro_pytorch.optimizer import get_optimizer
-from retro_pytorch.retrieval import text_folder_to_chunks_, chunks_to_precalculated_knn_, bert_embed, SOS_ID, EOS_ID
-from retro_pytorch.utils import memmap, is_true_env_flag
+from retro_pytorch_local import RETRO, RETRODataset
+from retro_pytorch_local.data import knn_to_retrieved_chunks
+from retro_pytorch_local.optimizer import get_optimizer
+from retro_pytorch_local.retrieval import text_folder_to_chunks_, chunks_to_precalculated_knn_, bert_embed, SOS_ID, EOS_ID
+from retro_pytorch_local.utils import memmap, is_true_env_flag
 
 from einops import rearrange
 

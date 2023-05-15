@@ -3,8 +3,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from retro_pytorch.retrieval import EOS_ID
-from retro_pytorch.utils import memmap
+from retro_pytorch_local.retrieval import EOS_ID
+from retro_pytorch_local.utils import memmap
 
 # knn to retrieved chunks
 
