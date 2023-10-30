@@ -509,6 +509,7 @@ class RETRO(nn.Module):
         self.encoder = Encoder(
             dim = enc_dim,
             context_dim = dec_dim,
+            dim_head = dim_head,
             depth = enc_depth,
             attn_dropout = enc_attn_dropout,
             ff_dropout = enc_ff_dropout,
@@ -522,6 +523,7 @@ class RETRO(nn.Module):
         self.decoder = Decoder(
             dim = dec_dim,
             depth = dec_depth,
+            dim_head = dim_head,
             attn_dropout = dec_attn_dropout,
             ff_dropout = dec_ff_dropout,
             cross_attn_layers = dec_cross_attn_layers,

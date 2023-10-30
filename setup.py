@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'retro-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.3.8',
+  version = '0.3.9',
   license='MIT',
   description = 'RETRO - Retrieval Enhanced Transformer - Pytorch',
   long_description_content_type = 'text/markdown',
